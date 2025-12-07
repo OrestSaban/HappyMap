@@ -29,6 +29,7 @@ export default function TabOneScreen() {
   const [scanStatus, setScanStatus] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchRadius, setSearchRadius] = useState<number>(500); // Default 500m
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
@@ -77,7 +78,7 @@ export default function TabOneScreen() {
         setScanStatus('Fetching nearby places...');
         setIsPlacesLoading(true);
         try {
-          const results = await fetchNearbyPlaces(location.latitude, location.longitude, 300, '');
+          const results = await fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, '');
           setPlaces(results);
           setScanStatus(results.length > 0 ? `Found ${results.length} places!` : 'No places found nearby.');
         } catch (e) {
@@ -160,10 +161,28 @@ export default function TabOneScreen() {
       return true;
     })
     .sort((a, b) => {
-      // Sort by Rating (Descending), places with no rating go last
-      const ratingA = a.rating || 0;
-      const ratingB = b.rating || 0;
-      return ratingB - ratingA;
+      // Bayesian Average Sorting
+      // Weighted Rating (WR) = (v / (v + m)) * R + (m / (v + m)) * C
+      // R = average for the place (rating)
+      // v = number of votes for the place (user_ratings_total)
+      // m = minimum votes required to be listed (confidence threshold, e.g. 10)
+      // C = the mean vote across the whole report (e.g. 4.0)
+
+      const getBayesianScore = (place: Place) => {
+        const R = place.rating || 0;
+        const v = place.user_ratings_total || 0;
+        const m = 10;
+        const C = 4.0;
+
+        if (v === 0) return 0;
+
+        return (v / (v + m)) * R + (m / (v + m)) * C;
+      };
+
+      const scoreA = getBayesianScore(a);
+      const scoreB = getBayesianScore(b);
+
+      return scoreB - scoreA;
     });
 
   const isLoading = isLocationLoading || isPlacesLoading;
@@ -267,6 +286,31 @@ export default function TabOneScreen() {
                 )}
               </LinearGradient>
             </TouchableOpacity>
+
+            <View style={styles.radiusContainer}>
+              {[50, 150, 500].map((radius) => (
+                <TouchableOpacity
+                  key={radius}
+                  style={[
+                    styles.radiusChip,
+                    searchRadius === radius && { backgroundColor: theme.primary },
+                    { borderColor: theme.textLight }
+                  ]}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    setSearchRadius(radius);
+                  }}
+                >
+                  <Text style={[
+                    styles.radiusText,
+                    { color: searchRadius === radius ? '#fff' : theme.textLight }
+                  ]}>
+                    {radius}m
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <View style={styles.statusContainer}>
               {location && <Text style={[styles.locationText, { color: theme.textLight }]}>{scanStatus}</Text>}
               {errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
@@ -684,5 +728,22 @@ const styles = StyleSheet.create({
   globalSearchText: {
     fontWeight: '700',
     fontSize: 14,
-  }
+  },
+  radiusContainer: {
+    flexDirection: 'row',
+    marginTop: 30,
+    gap: 15,
+  },
+  radiusChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  radiusText: {
+    fontWeight: '700',
+    fontSize: 12,
+  },
 });

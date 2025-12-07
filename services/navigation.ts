@@ -4,8 +4,8 @@ export const openMapsApp = async (lat: number, lng: number, label: string) => {
     const latLng = `${lat},${lng}`;
     const labelEncoded = encodeURIComponent(label);
 
-    // Use standard HTTPS URL for Apple Maps which is safer to open
-    const appleUrl = `http://maps.apple.com/?ll=${lat},${lng}&q=${labelEncoded}`;
+    // Use maps: scheme for Apple Maps which is more robust on Simulator/Device
+    const appleUrl = `maps:0,0?q=${labelEncoded}&ll=${lat},${lng}`;
     const googleUrl = `comgooglemaps://?q=${latLng}(${labelEncoded})&center=${latLng}&zoom=14&views=traffic`;
 
     if (Platform.OS === 'ios') {
@@ -18,11 +18,11 @@ export const openMapsApp = async (lat: number, lng: number, label: string) => {
                 [
                     {
                         text: 'Apple Maps',
-                        onPress: () => Linking.openURL(appleUrl)
+                        onPress: () => Linking.openURL(appleUrl).catch(err => console.error("Error opening Apple Maps", err))
                     },
                     {
                         text: 'Google Maps',
-                        onPress: () => Linking.openURL(googleUrl)
+                        onPress: () => Linking.openURL(googleUrl).catch(err => console.error("Error opening Google Maps", err))
                     },
                     {
                         text: 'Cancel',
@@ -31,11 +31,11 @@ export const openMapsApp = async (lat: number, lng: number, label: string) => {
                 ]
             );
         } else {
-            Linking.openURL(appleUrl);
+            Linking.openURL(appleUrl).catch(err => console.error("Error opening Apple Maps", err));
         }
     } else {
         // Android - Intent usually handles choice
         const androidUrl = `geo:${latLng}?q=${latLng}(${labelEncoded})`;
-        Linking.openURL(androidUrl);
+        Linking.openURL(androidUrl).catch(err => console.error("Error opening Android Maps", err));
     }
 };

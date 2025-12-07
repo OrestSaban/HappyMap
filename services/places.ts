@@ -75,6 +75,7 @@ export const fetchNearbyPlaces = async (
     const requestBody = {
         includedTypes: includedTypes,
         maxResultCount: 20,
+        rankPreference: 'DISTANCE',
         locationRestriction: {
             circle: {
                 center: {
