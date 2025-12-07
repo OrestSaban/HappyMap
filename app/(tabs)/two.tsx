@@ -1,9 +1,12 @@
+import { Text, View } from '@/components/Themed'; // Use Safe View
+import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { getSavedPlaces, SavedPlace } from '@/services/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useLayoutEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, TouchableOpacity } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 
 export default function MapScreen() {
@@ -12,6 +15,8 @@ export default function MapScreen() {
   const { location, requestLocation } = useUserLocation();
   const router = useRouter();
   const navigation = useNavigation();
+  const colorScheme = useColorScheme();
+  const theme = Colors[colorScheme ?? 'light'];
 
   const showMapSettings = useCallback(() => {
     Alert.alert(
@@ -21,7 +26,7 @@ export default function MapScreen() {
         {
           text: "Apple Maps (Default)",
           onPress: () => setIsGoogleMaps(false),
-          style: isGoogleMaps ? 'default' : 'cancel' // Highlight selected? Alert doesn't really support 'selected' state easily, but we can just set it.
+          style: isGoogleMaps ? 'default' : 'cancel'
         },
         {
           text: "Google Maps",
@@ -38,13 +43,14 @@ export default function MapScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
+      headerTintColor: theme.primary,
       headerRight: () => (
         <TouchableOpacity onPress={showMapSettings} style={{ marginRight: 15 }}>
-          <Ionicons name="settings-outline" size={24} color="#007AFF" />
+          <Ionicons name="settings-outline" size={24} color={theme.primary} />
         </TouchableOpacity>
       ),
     });
-  }, [navigation, showMapSettings]);
+  }, [navigation, showMapSettings, theme]);
 
   useFocusEffect(
     useCallback(() => {
@@ -57,10 +63,6 @@ export default function MapScreen() {
   );
 
   const handleMarkerPress = (place: SavedPlace) => {
-    // For markers, we often want to show a callout first.
-    // But for 'one tap' feel, opening modal is also fine.
-    // Let's use callout press to open details, or just regular press if user prefers.
-    // PRD says: "Tapping a place on the map opens a simple details sheet" (2.4 Map Interaction)
     router.push({
       pathname: '/modal',
       params: {
@@ -80,7 +82,8 @@ export default function MapScreen() {
         provider={isGoogleMaps ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
         showsUserLocation={true}
         showsMyLocationButton={true}
-        // Default to user location if available, otherwise some default or last saved place
+        tintColor={theme.primary}
+        userInterfaceStyle={colorScheme ?? 'light'}
         region={location ? {
           latitude: location.latitude,
           longitude: location.longitude,
@@ -97,15 +100,17 @@ export default function MapScreen() {
             }}
             title={place.name}
             description={place.vicinity}
+            pinColor={theme.primary}
             onCalloutPress={() => handleMarkerPress(place)}
           />
         ))}
       </MapView>
 
       {savedPlaces.length === 0 && (
-        <View style={styles.emptyOverlay}>
-          <Text style={styles.emptyText}>No saved places yet.</Text>
-          <Text style={styles.emptySubText}>Go to Discovery tab to find and save places!</Text>
+        <View style={[styles.emptyOverlay, { backgroundColor: theme.card }]}>
+          <Ionicons name="map" size={48} color={theme.textLight} style={{ marginBottom: 10 }} />
+          <Text style={[styles.emptyText, { color: theme.text }]}>No saved places yet</Text>
+          <Text style={[styles.emptySubText, { color: theme.textLight }]}>Places you save will appear here.</Text>
         </View>
       )}
     </View>
@@ -125,27 +130,26 @@ const styles = StyleSheet.create({
     bottom: 50,
     left: 20,
     right: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    padding: 20,
-    borderRadius: 15,
+    padding: 24,
+    borderRadius: 20,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 4,
     },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+    opacity: 0.95,
   },
   emptyText: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '700',
     marginBottom: 5,
   },
   emptySubText: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 15,
     textAlign: 'center',
   },
 });

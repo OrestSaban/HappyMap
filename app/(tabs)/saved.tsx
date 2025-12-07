@@ -1,10 +1,11 @@
-import { Text, View } from '@/components/Themed';
+import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
 import { fetchPlaceDetails } from '@/services/places';
 import { getSavedPlaces, removePlace, SavedPlace, updateSavedPlace } from '@/services/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { Alert, LayoutAnimation, Platform, SectionList, StyleSheet, TouchableOpacity, UIManager } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { Alert, LayoutAnimation, Platform, SectionList, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
 
 if (
     Platform.OS === 'android' &&
@@ -23,6 +24,8 @@ export default function SavedScreen() {
     const [expandedCity, setExpandedCity] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const router = useRouter();
+    const colorScheme = useColorScheme();
+    const theme = Colors[colorScheme ?? 'light'];
 
     const loadPlaces = async () => {
         setIsLoading(true);
@@ -32,21 +35,16 @@ export default function SavedScreen() {
         const placesToUpdate = places.filter(p => !p.city);
 
         if (placesToUpdate.length > 0) {
-            console.log(`Self-healing ${placesToUpdate.length} places (missing city)...`);
-            // Fetch checks in parallel
             await Promise.all(placesToUpdate.map(async (place) => {
                 try {
-                    const city = await fetchPlaceDetails(place.place_id);
-                    if (city) {
-                        place.city = city;
-                        await updateSavedPlace(place);
+                    const placeDetails = await fetchPlaceDetails(place.place_id);
+                    if (placeDetails && placeDetails.city) {
+                        await updateSavedPlace(place.place_id, { city: placeDetails.city });
                     }
                 } catch (e) {
                     console.warn(`Failed to heal place ${place.name}`, e);
                 }
             }));
-
-            // Re-fetch to be safe, or just use modified 'places' array
             places = await getSavedPlaces();
         }
 
@@ -55,55 +53,33 @@ export default function SavedScreen() {
         places.forEach(place => {
             let city = 'Unknown Location';
 
-            // Priority 0: Saved Canonical City (Self-Healed)
             if (place.city) {
                 city = place.city;
-            } else
-                // Priority 1: Plus Code (Compound Code)
-                // Format: "8FQQ+4X Prague - Prague 6, Czechia" -> We want "Prague"
-                if (place.plus_code && place.plus_code.compound_code) {
-                    const parts = place.plus_code.compound_code.split(' ');
-                    if (parts.length > 1) {
-                        // Remove the code (first part)
-                        let addressPart = parts.slice(1).join(' '); // "Prague - Prague 6, Czechia"
-
-                        // Remove country if present (usually last part after comma)
-                        const commaParts = addressPart.split(',');
-                        if (commaParts.length > 1) {
-                            addressPart = commaParts[0].trim(); // "Prague - Prague 6"
-                        }
-
-                        // Remove sub-regions separated by " - "
-                        const subRegionParts = addressPart.split(' - ');
-                        if (subRegionParts.length > 0) {
-                            city = subRegionParts[0].trim(); // "Prague"
-                        } else {
-                            city = addressPart;
-                        }
+            } else if (place.plus_code && place.plus_code.compound_code) {
+                const parts = place.plus_code.compound_code.split(' ');
+                if (parts.length > 1) {
+                    let addressPart = parts.slice(1).join(' ');
+                    const commaParts = addressPart.split(',');
+                    if (commaParts.length > 1) {
+                        addressPart = commaParts[0].trim();
                     }
-                } else if (place.vicinity) {
-                    // Priority 2: Vicinity Logic
-                    // "Vinohradská 12, 120 00 Prague 2" -> We want "Prague"
-                    const parts = place.vicinity.split(',');
-                    if (parts.length > 1) {
-                        let lastPart = parts[parts.length - 1].trim(); // "120 00 Prague 2"
-
-                        // Attempt to remove Zip Codes (looks for leading digits)
-                        // "120 00 Prague 2" -> "Prague 2"
-                        // "Prague 2" is technically a district, but often used as City. 
-                        // To be safe, just stripping numbers might be too aggressive if city name has numbers (rare).
-                        // Let's strip purely numeric/space prefixes.
-                        lastPart = lastPart.replace(/^[\d\s]+/, '');
-
-                        // Also often cities have "Prague 1", "Prague 2". Ideally we group them all as "Prague".
-                        // Heuristic: If it starts with "Prague", just use "Prague"?
-                        // No, that's hardcoding.
-                        // For now, let's just use the cleaner string.
-                        city = lastPart;
+                    const subRegionParts = addressPart.split(' - ');
+                    if (subRegionParts.length > 0) {
+                        city = subRegionParts[0].trim();
                     } else {
-                        city = place.vicinity;
+                        city = addressPart;
                     }
                 }
+            } else if (place.vicinity) {
+                const parts = place.vicinity.split(',');
+                if (parts.length > 1) {
+                    let lastPart = parts[parts.length - 1].trim();
+                    lastPart = lastPart.replace(/^[\d\s]+/, '');
+                    city = lastPart;
+                } else {
+                    city = place.vicinity;
+                }
+            }
 
             if (!groups[city]) {
                 groups[city] = [];
@@ -134,12 +110,9 @@ export default function SavedScreen() {
     const confirmDelete = (place: SavedPlace) => {
         Alert.alert(
             "Remove Place",
-            `Are you sure you want to remove "${place.name}" from your saved places?`,
+            `Remove "${place.name}"?`,
             [
-                {
-                    text: "Cancel",
-                    style: "cancel"
-                },
+                { text: "Cancel", style: "cancel" },
                 {
                     text: "Remove",
                     onPress: async () => {
@@ -166,23 +139,27 @@ export default function SavedScreen() {
     };
 
     const renderItem = ({ item: place, section }: { item: SavedPlace, section: Section }) => {
-        // Only render if this section is expanded
         if (section.title !== expandedCity) {
             return null;
         }
 
         return (
-            <View style={styles.card}>
+            <View style={[styles.card, { backgroundColor: theme.card, shadowColor: theme.text }]}>
                 <TouchableOpacity style={styles.cardContent} onPress={() => handlePlacePress(place)}>
-                    <Text style={styles.placeName}>{place.name}</Text>
-                    <Text style={styles.placeAddress}>{place.vicinity}</Text>
-                    <Text style={styles.placeType}>{place.types[0]}</Text>
+                    <View style={[styles.cardIcon, { backgroundColor: theme.background }]}>
+                        <Ionicons name="location" size={24} color={theme.accent} />
+                    </View>
+                    <View style={styles.cardText}>
+                        <Text style={[styles.placeName, { color: theme.text }]} numberOfLines={1}>{place.name}</Text>
+                        <Text style={[styles.placeAddress, { color: theme.textLight }]} numberOfLines={1}>{place.vicinity}</Text>
+                        <Text style={[styles.placeType, { color: theme.primary }]}>{place.types[0]?.replace('_', ' ')}</Text>
+                    </View>
                 </TouchableOpacity>
                 <TouchableOpacity
                     onPress={() => confirmDelete(place)}
                     style={styles.deleteButton}
                 >
-                    <Ionicons name="trash-outline" size={24} color="#ff3b30" />
+                    <Ionicons name="trash-outline" size={24} color={theme.danger} />
                 </TouchableOpacity>
             </View>
         );
@@ -192,28 +169,39 @@ export default function SavedScreen() {
         const isExpanded = expandedCity === title;
         return (
             <TouchableOpacity
-                style={styles.headerBackground}
+                style={[
+                    styles.headerBackground,
+                    { backgroundColor: theme.card, shadowColor: theme.text },
+                    isExpanded && { backgroundColor: theme.primary }
+                ]}
                 onPress={() => toggleSection(title)}
                 activeOpacity={0.7}
             >
-                <Text style={styles.sectionHeader}>{title}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="map-outline" size={20} color={isExpanded ? '#fff' : theme.accent} style={{ marginRight: 10 }} />
+                    <Text style={[styles.sectionHeader, { color: isExpanded ? '#fff' : theme.text }]}>{title}</Text>
+                </View>
                 <Ionicons
                     name={isExpanded ? "chevron-up" : "chevron-down"}
                     size={20}
-                    color="#007AFF"
+                    color={isExpanded ? '#fff' : theme.textLight}
                 />
             </TouchableOpacity>
         );
     };
 
     return (
-        <View style={styles.container}>
-            <Text style={styles.headerTitle}>My Places</Text>
+        <View style={[styles.container, { backgroundColor: theme.background }]}>
+            <View style={styles.header}>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>My Places</Text>
+                <Text style={[styles.headerSubtitle, { color: theme.textLight }]}>{sections.length} Cities Saved</Text>
+            </View>
 
             {sections.length === 0 && !isLoading && (
                 <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>No saved places yet.</Text>
-                    <Text style={styles.emptySubText}>Go explore and save some!</Text>
+                    <Ionicons name="heart-dislike-outline" size={64} color={theme.textLight} />
+                    <Text style={[styles.emptyText, { color: theme.text }]}>No saved places yet.</Text>
+                    <Text style={[styles.emptySubText, { color: theme.textLight }]}>Go explore and save some!</Text>
                 </View>
             )}
 
@@ -224,6 +212,7 @@ export default function SavedScreen() {
                 renderSectionHeader={renderSectionHeader}
                 contentContainerStyle={styles.list}
                 stickySectionHeadersEnabled={false}
+                showsVerticalScrollIndicator={false}
             />
         </View>
     );
@@ -233,66 +222,82 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         paddingTop: 60,
-        backgroundColor: '#fff',
+    },
+    header: {
+        paddingHorizontal: 20,
+        marginBottom: 20,
     },
     headerTitle: {
-        fontSize: 32,
-        fontWeight: 'bold',
-        marginLeft: 20,
-        marginBottom: 10,
+        fontSize: 34,
+        fontWeight: '800',
+        letterSpacing: -1,
+    },
+    headerSubtitle: {
+        fontSize: 16,
+        marginTop: 4,
     },
     list: {
         paddingHorizontal: 20,
         paddingBottom: 20,
     },
     headerBackground: {
-        backgroundColor: '#f8f9fa',
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        marginBottom: 8,
-        borderRadius: 10,
+        paddingVertical: 16,
+        paddingHorizontal: 20,
+        marginBottom: 10,
+        borderRadius: 16,
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
     },
     sectionHeader: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#333',
+        fontSize: 16,
+        fontWeight: '700',
     },
     card: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#fff',
-        borderRadius: 12,
+        borderRadius: 16,
         padding: 16,
-        marginBottom: 12,
-        marginLeft: 8, // Indent items slightly
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
+        marginBottom: 10,
+        marginLeft: 10,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
         elevation: 2,
-        borderWidth: 1,
-        borderColor: '#f0f0f0',
     },
     cardContent: {
         flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    cardIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    cardText: {
+        flex: 1,
     },
     placeName: {
-        fontSize: 18,
-        fontWeight: '600',
-        marginBottom: 4,
+        fontSize: 16,
+        fontWeight: '700',
+        marginBottom: 2,
     },
     placeAddress: {
-        fontSize: 14,
-        color: '#666',
-        marginBottom: 4,
+        fontSize: 13,
+        marginBottom: 2,
     },
     placeType: {
-        fontSize: 12,
-        color: '#007AFF',
-        textTransform: 'capitalize',
+        fontSize: 11,
+        textTransform: 'uppercase',
+        fontWeight: '700',
     },
     deleteButton: {
         padding: 8,
@@ -301,15 +306,15 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         paddingTop: 100,
+        opacity: 0.5,
     },
     emptyText: {
-        fontSize: 18,
-        color: '#333',
+        fontSize: 20,
         fontWeight: 'bold',
+        marginTop: 20,
     },
     emptySubText: {
         marginTop: 8,
-        fontSize: 14,
-        color: '#666',
+        fontSize: 16,
     }
 });

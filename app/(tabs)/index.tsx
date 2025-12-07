@@ -1,4 +1,4 @@
-import { Text, View } from '@/components/Themed';
+import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { fetchNearbyPlaces, fetchPlaceDetails, Place } from '@/services/places';
@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, LayoutAnimation, Platform, ScrollView, StyleSheet, TouchableOpacity, UIManager } from 'react-native';
+import { ActivityIndicator, LayoutAnimation, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
 
 const CATEGORIES = [
   { id: 'all', label: 'All', types: [], icon: 'grid-outline' },
@@ -29,16 +29,16 @@ export default function TabOneScreen() {
   const [scanStatus, setScanStatus] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const router = useRouter();
+  const colorScheme = useColorScheme();
+  const theme = Colors[colorScheme ?? 'light'];
 
   const handleScan = async () => {
     setPlaces([]);
     setScanStatus('Acquiring User Location...');
     await requestLocation();
-    // Logic continues in useEffect when location updates
   };
 
   useEffect(() => {
-    // Load saved places on mount to know what is already saved
     const loadSaved = async () => {
       const saved = await getSavedPlaces();
       setSavedPlaceIds(new Set(saved.map(p => p.place_id)));
@@ -52,7 +52,7 @@ export default function TabOneScreen() {
         setScanStatus('Fetching nearby places...');
         setIsPlacesLoading(true);
         try {
-          const results = await fetchNearbyPlaces(location.latitude, location.longitude, 50, '');
+          const results = await fetchNearbyPlaces(location.latitude, location.longitude, 100, '');
           setPlaces(results);
           setScanStatus(results.length > 0 ? `Found ${results.length} places!` : 'No places found nearby.');
         } catch (e) {
@@ -68,7 +68,6 @@ export default function TabOneScreen() {
 
   const toggleSave = async (place: Place) => {
     const isSaved = savedPlaceIds.has(place.place_id);
-    // Optimistic UI Update
     setSavedPlaceIds(prev => {
       const newSet = new Set(prev);
       if (isSaved) newSet.delete(place.place_id);
@@ -92,7 +91,6 @@ export default function TabOneScreen() {
       }
     } catch (e) {
       console.error("Save failed", e);
-      // Revert on failure
       setSavedPlaceIds(prev => {
         const newSet = new Set(prev);
         if (isSaved) newSet.add(place.place_id);
@@ -128,12 +126,18 @@ export default function TabOneScreen() {
   });
 
   const isLoading = isLocationLoading || isPlacesLoading;
+  const hasPerformedScan = places.length > 0 || scanStatus.includes('No places');
+
+  // Logic: Show Scan Button if we haven't scanned yet, OR if we scanned effectively but found nothing (and user clears filter or decides to rescan)
+  // Logic Fix: If we HAVE places (`places.length > 0`) but filtered list is empty, SHOW "No Results in Category" message.
+
+  const showScanButton = !hasPerformedScan && places.length === 0;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>HappyMap</Text>
-        <Text style={styles.subtitle}>Discover joy around you</Text>
+        <Text style={[styles.title, { color: theme.text }]}>HappyMap</Text>
+        <Text style={[styles.subtitle, { color: theme.textLight }]}>Discover joy around you</Text>
       </View>
 
       <View style={styles.filterContainer}>
@@ -143,16 +147,20 @@ export default function TabOneScreen() {
             return (
               <TouchableOpacity
                 key={cat.id}
-                style={[styles.filterChip, isActive && styles.filterChipActive]}
+                style={[
+                  styles.filterChip,
+                  { backgroundColor: theme.card, borderColor: theme.textLight, shadowColor: theme.text },
+                  isActive && { backgroundColor: theme.accent, borderColor: theme.accent }
+                ]}
                 onPress={() => handleCategorySelect(cat.id)}
               >
                 <Ionicons
                   name={cat.icon as any}
                   size={16}
-                  color={isActive ? '#fff' : Colors.light.text}
+                  color={isActive ? '#fff' : theme.text}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[styles.filterText, isActive && styles.filterTextActive]}>
+                <Text style={[styles.filterText, { color: theme.text }, isActive && styles.filterTextActive]}>
                   {cat.label}
                 </Text>
               </TouchableOpacity>
@@ -162,7 +170,7 @@ export default function TabOneScreen() {
       </View>
 
       <View style={styles.mainContent}>
-        {filteredPlaces.length === 0 && !isLoading ? (
+        {showScanButton && !isLoading ? (
           <View style={styles.scanContainer}>
             <TouchableOpacity
               activeOpacity={0.8}
@@ -170,10 +178,10 @@ export default function TabOneScreen() {
               disabled={isLoading}
             >
               <LinearGradient
-                colors={['#FF4B4B', '#FFD700']}
+                colors={[theme.primary, theme.secondary]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={styles.scanButton}
+                style={[styles.scanButton, { shadowColor: theme.primary }]}
               >
                 {isLoading ? (
                   <ActivityIndicator size="large" color="#fff" />
@@ -186,53 +194,75 @@ export default function TabOneScreen() {
               </LinearGradient>
             </TouchableOpacity>
             <View style={styles.statusContainer}>
-              {location && <Text style={styles.locationText}>{scanStatus}</Text>}
+              {location && <Text style={[styles.locationText, { color: theme.textLight }]}>{scanStatus}</Text>}
               {errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
             </View>
           </View>
         ) : (
-          <ScrollView
-            style={styles.resultsList}
-            contentContainerStyle={styles.resultsContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.listHeader}>
-              <Text style={styles.resultsTitle}>
-                Found {filteredPlaces.length} places
-              </Text>
-              <TouchableOpacity onPress={() => setPlaces([])}>
-                <Text style={styles.clearText}>Clear</Text>
-              </TouchableOpacity>
-            </View>
-
-            {filteredPlaces.map((place) => {
-              const isSaved = savedPlaceIds.has(place.place_id);
-              return (
-                <View key={place.place_id} style={styles.card}>
-                  <TouchableOpacity style={styles.cardContent} onPress={() => handlePlacePress(place)}>
-                    <View style={styles.cardIcon}>
-                      <Ionicons name="location" size={24} color={Colors.light.accent} />
-                    </View>
-                    <View style={styles.cardText}>
-                      <Text style={styles.placeName} numberOfLines={1}>{place.name}</Text>
-                      <Text style={styles.placeVicinity} numberOfLines={1}>{place.vicinity}</Text>
-                      <View style={styles.tagContainer}>
-                        <Text style={styles.categoryTag}>{place.types[0]?.replace('_', ' ')}</Text>
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.heartButton} onPress={() => toggleSave(place)}>
-                    <Ionicons
-                      name={isSaved ? "heart" : "heart-outline"}
-                      size={28}
-                      color={Colors.light.primary}
-                    />
+          <View style={{ flex: 1 }}>
+            {/* If we have places but filter returns none */}
+            {!isLoading && places.length > 0 && filteredPlaces.length === 0 ? (
+              <View style={styles.emptyStateContainer}>
+                <Ionicons name="search-outline" size={48} color={theme.textLight} />
+                <Text style={[styles.emptyStateText, { color: theme.text }]}>
+                  No {CATEGORIES.find(c => c.id === selectedCategory)?.label} found nearby.
+                </Text>
+                <TouchableOpacity onPress={() => setSelectedCategory('all')}>
+                  <Text style={[styles.clearText, { color: theme.primary, marginTop: 10 }]}>View All Places</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.resultsList}
+                contentContainerStyle={styles.resultsContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.listHeader}>
+                  <Text style={[styles.resultsTitle, { color: theme.text }]}>
+                    Found {filteredPlaces.length} places
+                  </Text>
+                  <TouchableOpacity onPress={() => { setPlaces([]); setScanStatus(''); }}>
+                    <Text style={[styles.clearText, { color: theme.primary }]}>Clear & Rescan</Text>
                   </TouchableOpacity>
                 </View>
-              );
-            })}
-            <View style={{ height: 100 }} />
-          </ScrollView>
+
+                {filteredPlaces.map((place) => {
+                  const isSaved = savedPlaceIds.has(place.place_id);
+                  return (
+                    <View key={place.place_id} style={[styles.card, { backgroundColor: theme.card, shadowColor: theme.text }]}>
+                      <TouchableOpacity style={styles.cardContent} onPress={() => handlePlacePress(place)}>
+                        <View style={[styles.cardIcon, { backgroundColor: theme.background }]}>
+                          <Ionicons name="location" size={24} color={theme.accent} />
+                        </View>
+                        <View style={styles.cardText}>
+                          <Text style={[styles.placeName, { color: theme.text }]} numberOfLines={1}>{place.name}</Text>
+                          <Text style={[styles.placeVicinity, { color: theme.textLight }]} numberOfLines={1}>{place.vicinity}</Text>
+                          <View style={[styles.tagContainer, { backgroundColor: theme.background }]}>
+                            <Text style={[styles.categoryTag, { color: theme.primary }]}>{place.types[0]?.replace('_', ' ')}</Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.heartButton} onPress={() => toggleSave(place)}>
+                        <Ionicons
+                          name={isSaved ? "heart" : "heart-outline"}
+                          size={28}
+                          color={theme.primary}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+                <View style={{ height: 100 }} />
+              </ScrollView>
+            )}
+            {/* Loading State Overlay if needed, usually handled by scan button replacement but here for location updates */}
+            {isLoading && (
+              <View style={[styles.loadingOverlay, { backgroundColor: theme.background }]}>
+                <ActivityIndicator size="large" color={theme.primary} />
+                <Text style={[styles.loadingText, { color: theme.text }]}>{scanStatus}</Text>
+              </View>
+            )}
+          </View>
         )}
       </View>
     </View>
@@ -242,7 +272,6 @@ export default function TabOneScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.light.background,
     paddingTop: 60,
   },
   header: {
@@ -252,12 +281,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 34,
     fontWeight: '800',
-    color: Colors.light.text,
     letterSpacing: -1,
   },
   subtitle: {
     fontSize: 16,
-    color: Colors.light.textLight,
     marginTop: 4,
   },
   filterContainer: {
@@ -274,23 +301,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 25,
-    backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: '#eee',
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
   },
-  filterChipActive: {
-    backgroundColor: Colors.light.accent,
-    borderColor: Colors.light.accent,
-  },
   filterText: {
     fontSize: 14,
     fontWeight: '600',
-    color: Colors.light.text,
   },
   filterTextActive: {
     color: '#fff',
@@ -311,7 +330,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 10,
-    shadowColor: Colors.light.primary,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.4,
     shadowRadius: 15,
@@ -328,12 +346,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   locationText: {
-    color: Colors.light.textLight,
     fontSize: 16,
     fontWeight: '500',
   },
   errorText: {
-    color: Colors.light.danger,
+    color: '#FF4B4B',
     marginTop: 10,
   },
   resultsList: {
@@ -352,20 +369,16 @@ const styles = StyleSheet.create({
   resultsTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: Colors.light.text,
   },
   clearText: {
-    color: Colors.light.primary,
     fontWeight: '600',
   },
   card: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
     borderRadius: 20,
     padding: 16,
     marginBottom: 16,
     alignItems: 'center',
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -380,7 +393,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F0F4FF',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 15,
@@ -391,28 +403,46 @@ const styles = StyleSheet.create({
   placeName: {
     fontSize: 16,
     fontWeight: '700',
-    color: Colors.light.text,
     marginBottom: 2,
   },
   placeVicinity: {
     fontSize: 13,
-    color: Colors.light.textLight,
     marginBottom: 6,
   },
   tagContainer: {
     alignSelf: 'flex-start',
-    backgroundColor: '#FFF5F5',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
   },
   categoryTag: {
     fontSize: 10,
-    color: Colors.light.primary,
     fontWeight: '700',
     textTransform: 'uppercase',
   },
   heartButton: {
     padding: 10,
+  },
+  emptyStateContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 100
+  },
+  emptyStateText: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 10
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  loadingText: {
+    marginTop: 20,
+    fontSize: 16,
+    fontWeight: '500',
   }
 });
