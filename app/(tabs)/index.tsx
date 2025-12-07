@@ -201,6 +201,12 @@ export default function TabOneScreen() {
     );
   };
 
+  const formatDistance = (meters?: number) => {
+    if (!meters) return null;
+    if (meters < 1000) return `${Math.round(meters)}m`;
+    return `${(meters / 1000).toFixed(1)}km`;
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.header}>
@@ -360,7 +366,12 @@ export default function TabOneScreen() {
 
                           <View style={styles.cardText}>
                             <Text style={[styles.placeName, { color: theme.text }]} numberOfLines={1}>{place.name}</Text>
-                            <Text style={[styles.placeVicinity, { color: theme.textLight }]} numberOfLines={1}>{place.vicinity}</Text>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text style={[styles.placeVicinity, { color: theme.textLight, flex: 1 }]} numberOfLines={1}>{place.vicinity}</Text>
+                              {place.distance && (
+                                <Text style={[styles.distanceText, { color: theme.primary }]}>{formatDistance(place.distance)}</Text>
+                              )}
+                            </View>
 
                             <View style={styles.detailRow}>
                               {renderRating(place.rating, place.user_ratings_total)}
@@ -656,5 +667,22 @@ const styles = StyleSheet.create({
     marginTop: 20,
     fontSize: 16,
     fontWeight: '500',
+  },
+  distanceText: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  globalSearchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  globalSearchText: {
+    fontWeight: '700',
+    fontSize: 14,
   }
 });
