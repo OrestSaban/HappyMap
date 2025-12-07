@@ -2,67 +2,33 @@ import { Text, View } from '@/components/Themed'; // Use Safe View
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useUserLocation } from '@/hooks/useUserLocation';
-import { getSavedPlaces, SavedPlace } from '@/services/storage';
+import { getSavedPlaces, SavedPlace } from '@/services/storage'; // Changed from Place to SavedPlace to match original type
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
-import { useCallback, useLayoutEffect, useState } from 'react';
-import { Alert, StyleSheet, TouchableOpacity } from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { StyleSheet } from 'react-native'; // Removed Alert
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps'; // Removed PROVIDER_DEFAULT
 
-export default function MapScreen() {
-  const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([]);
-  const [isGoogleMaps, setIsGoogleMaps] = useState(false);
+export default function MapScreen() { // Renamed from TabTwoScreen to MapScreen to match original
+  const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([]); // Changed from Place to SavedPlace to match original type
   const { location, requestLocation } = useUserLocation();
   const router = useRouter();
-  const navigation = useNavigation();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
 
-  const showMapSettings = useCallback(() => {
-    Alert.alert(
-      "Map Settings",
-      "Choose Map Provider",
-      [
-        {
-          text: "Apple Maps (Default)",
-          onPress: () => setIsGoogleMaps(false),
-          style: isGoogleMaps ? 'default' : 'cancel'
-        },
-        {
-          text: "Google Maps",
-          onPress: () => setIsGoogleMaps(true),
-          style: isGoogleMaps ? 'cancel' : 'default'
-        },
-        {
-          text: "Cancel",
-          style: "cancel"
-        }
-      ]
-    );
-  }, [isGoogleMaps]);
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerTintColor: theme.primary,
-      headerRight: () => (
-        <TouchableOpacity onPress={showMapSettings} style={{ marginRight: 15 }}>
-          <Ionicons name="settings-outline" size={24} color={theme.primary} />
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation, showMapSettings, theme]);
-
   useFocusEffect(
     useCallback(() => {
-      const loadPlaces = async () => {
+      const loadPlaces = async () => { // Renamed from load to loadPlaces
         const places = await getSavedPlaces();
         setSavedPlaces(places);
       };
       loadPlaces();
+      // Ensure we have location permission on map view too
+      requestLocation();
     }, [])
   );
 
-  const handleMarkerPress = (place: SavedPlace) => {
+  const handleMarkerPress = (place: SavedPlace) => { // Renamed from handleCalloutPress to handleMarkerPress, and type from Place to SavedPlace
     router.push({
       pathname: '/modal',
       params: {
@@ -79,7 +45,7 @@ export default function MapScreen() {
     <View style={styles.container}>
       <MapView
         style={styles.map}
-        provider={isGoogleMaps ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
+        provider={PROVIDER_GOOGLE} // Set provider to PROVIDER_GOOGLE
         showsUserLocation={true}
         showsMyLocationButton={true}
         tintColor={theme.primary}

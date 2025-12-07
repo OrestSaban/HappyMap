@@ -1,13 +1,13 @@
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useUserLocation } from '@/hooks/useUserLocation';
-import { fetchNearbyPlaces, fetchPlaceDetails, Place } from '@/services/places';
+import { fetchNearbyPlaces, fetchPlaceDetails, getPlacePhotoUrl, Place, searchPlacesByText } from '@/services/places';
 import { getSavedPlaces, removePlace, savePlace } from '@/services/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, LayoutAnimation, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
+import { ActivityIndicator, Image, LayoutAnimation, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 
 const CATEGORIES = [
   { id: 'all', label: 'All', types: [], icon: 'grid-outline' },
@@ -38,6 +38,27 @@ export default function TabOneScreen() {
     setSearchQuery('');
     setScanStatus('Acquiring User Location...');
     await requestLocation();
+  };
+
+  const handleGlobalSearch = async () => {
+    if (!location || !searchQuery.trim()) return;
+
+    setPlaces([]);
+    setScanStatus(`Searching Google for "${searchQuery}"...`);
+    setIsPlacesLoading(true);
+
+    try {
+      const results = await searchPlacesByText(searchQuery, location.latitude, location.longitude);
+      setPlaces(results);
+      setScanStatus(results.length > 0 ? `Found ${results.length} results for "${searchQuery}"` : `No results for "${searchQuery}"`);
+      // Reset category to 'all' so we see the results
+      setSelectedCategory('all');
+    } catch (e) {
+      setScanStatus('Error searching places');
+      console.error(e);
+    } finally {
+      setIsPlacesLoading(false);
+    }
   };
 
   useFocusEffect(
@@ -276,6 +297,16 @@ export default function TabOneScreen() {
                   <TouchableOpacity onPress={() => { setSelectedCategory('all'); setSearchQuery(''); }}>
                     <Text style={[styles.clearText, { color: theme.primary, marginTop: 10 }]}>Clear Filters</Text>
                   </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.globalSearchButton, { backgroundColor: theme.card, borderColor: theme.primary, marginTop: 20 }]}
+                    onPress={handleGlobalSearch}
+                  >
+                    <Ionicons name="globe-outline" size={20} color={theme.primary} style={{ marginRight: 8 }} />
+                    <Text style={[styles.globalSearchText, { color: theme.primary }]}>
+                      Search Google Maps for "{searchQuery}"
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             ) : (
@@ -314,12 +345,19 @@ export default function TabOneScreen() {
 
                   {filteredPlaces.map((place) => {
                     const isSaved = savedPlaceIds.has(place.place_id);
+                    const photoUrl = place.photos?.[0]?.name ? getPlacePhotoUrl(place.photos[0].name) : null;
+
                     return (
                       <View key={place.place_id} style={[styles.card, { backgroundColor: theme.card, shadowColor: theme.text }]}>
                         <TouchableOpacity style={styles.cardContent} onPress={() => handlePlacePress(place)}>
-                          <View style={[styles.cardIcon, { backgroundColor: theme.background }]}>
-                            <Ionicons name="location" size={24} color={theme.accent} />
-                          </View>
+                          {photoUrl ? (
+                            <Image source={{ uri: photoUrl }} style={styles.cardInfoImage} />
+                          ) : (
+                            <View style={[styles.cardIcon, { backgroundColor: theme.background }]}>
+                              <Ionicons name="location" size={24} color={theme.accent} />
+                            </View>
+                          )}
+
                           <View style={styles.cardText}>
                             <Text style={[styles.placeName, { color: theme.text }]} numberOfLines={1}>{place.name}</Text>
                             <Text style={[styles.placeVicinity, { color: theme.textLight }]} numberOfLines={1}>{place.vicinity}</Text>
@@ -347,6 +385,23 @@ export default function TabOneScreen() {
                       </View>
                     );
                   })}
+
+
+                  {/* Footer Global Search Option */}
+                  {searchQuery.length > 0 && (
+                    <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                      <TouchableOpacity
+                        style={[styles.globalSearchButton, { backgroundColor: theme.card, borderColor: theme.primary }]}
+                        onPress={handleGlobalSearch}
+                      >
+                        <Ionicons name="globe-outline" size={20} color={theme.primary} style={{ marginRight: 8 }} />
+                        <Text style={[styles.globalSearchText, { color: theme.primary }]}>
+                          Search Google Maps for "{searchQuery}"
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
                   <View style={{ height: 100 }} />
                 </ScrollView>
               </View>
@@ -502,13 +557,19 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start', // Align to top
   },
   cardIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 15,
-    marginTop: 4,
+  },
+  cardInfoImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    marginRight: 15,
+    backgroundColor: '#eee'
   },
   cardText: {
     flex: 1,

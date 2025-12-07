@@ -1,11 +1,11 @@
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
-import { fetchPlaceDetails } from '@/services/places';
+import { fetchPlaceDetails, getPlacePhotoUrl } from '@/services/places';
 import { getSavedPlaces, removePlace, SavedPlace, updateSavedPlace } from '@/services/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Alert, LayoutAnimation, Platform, SectionList, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
+import { Alert, Image, LayoutAnimation, Platform, SectionList, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
 
 if (
     Platform.OS === 'android' &&
@@ -143,13 +143,19 @@ export default function SavedScreen() {
             return null;
         }
 
+        const photoUrl = place.photos?.[0]?.name ? getPlacePhotoUrl(place.photos[0].name) : null;
+
         return (
             <View style={[styles.card, { backgroundColor: theme.card, shadowColor: theme.text }]}>
                 <TouchableOpacity style={styles.cardContent} onPress={() => handlePlacePress(place)}>
-                    <View style={[styles.cardIcon, { backgroundColor: theme.background }]}>
-                        <Ionicons name="location" size={24} color={theme.accent} />
-                    </View>
-                    <View style={styles.cardText}>
+                    {photoUrl ? (
+                        <Image source={{ uri: photoUrl }} style={styles.placeInfoImage} />
+                    ) : (
+                        <View style={[styles.placeIcon, { backgroundColor: theme.background }]}>
+                            <Ionicons name="location" size={24} color={theme.accent} />
+                        </View>
+                    )}
+                    <View style={styles.placeInfo}>
                         <Text style={[styles.placeName, { color: theme.text }]} numberOfLines={1}>{place.name}</Text>
                         <Text style={[styles.placeAddress, { color: theme.textLight }]} numberOfLines={1}>{place.vicinity}</Text>
                         <Text style={[styles.placeType, { color: theme.primary }]}>{place.types[0]?.replace('_', ' ')}</Text>
@@ -274,15 +280,22 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
     },
-    cardIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+    placeIcon: {
+        width: 50,
+        height: 50,
+        borderRadius: 8,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 12,
+        marginRight: 15,
     },
-    cardText: {
+    placeInfoImage: {
+        width: 50,
+        height: 50,
+        borderRadius: 8,
+        marginRight: 15,
+        backgroundColor: '#333'
+    },
+    placeInfo: {
         flex: 1,
     },
     placeName: {

@@ -16,12 +16,15 @@ export type Place = {
     user_ratings_total?: number;
     price_level?: number;
     photos?: {
-        photo_reference: string;
+        name: string; // V1 API returns 'name' as resource ID (e.g. "places/PLACE_ID/photos/PHOTO_ID")
+        photo_reference?: string; // Legacy support
     }[];
     types: string[];
     opening_hours?: {
         open_now: boolean;
+        weekday_text?: string[]; // For detailed hours
     };
+    summary?: string; // Editorial summary
 };
 
 const GOOGLE_PLACES_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
@@ -73,7 +76,7 @@ export const fetchNearbyPlaces = async (
             headers: {
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': GOOGLE_PLACES_API_KEY,
-                'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount,places.priceLevel,places.regularOpeningHours,places.photos'
+                'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount,places.priceLevel,places.regularOpeningHours,places.photos,places.editorialSummary'
             },
             body: JSON.stringify(requestBody)
         });
@@ -109,9 +112,13 @@ export const fetchNearbyPlaces = async (
                 rating: place.rating,
                 user_ratings_total: place.userRatingCount,
                 price_level: priceLevel,
-                photos: place.photos ? place.photos.map((p: any) => ({ photo_reference: p.name })) : undefined, // V1 photos use 'name' as resource ID
+                photos: place.photos ? place.photos.map((p: any) => ({ name: p.name })) : undefined, // V1 photos use 'name' as resource ID
                 types: place.types,
-                opening_hours: place.regularOpeningHours ? { open_now: place.regularOpeningHours.openNow } : undefined,
+                opening_hours: place.regularOpeningHours ? {
+                    open_now: place.regularOpeningHours.openNow,
+                    weekday_text: place.regularOpeningHours.weekdayDescriptions
+                } : undefined,
+                summary: place.editorialSummary?.text
             };
         });
 
@@ -121,6 +128,11 @@ export const fetchNearbyPlaces = async (
         console.error('Error fetching places:', error);
         throw error;
     }
+};
+
+export const getPlacePhotoUrl = (name?: string) => {
+    if (!name || !GOOGLE_PLACES_API_KEY) return null;
+    return `https://places.googleapis.com/v1/${name}/media?maxHeightPx=400&maxWidthPx=400&key=${GOOGLE_PLACES_API_KEY}`;
 };
 
 export const fetchPlaceDetails = async (placeId: string): Promise<string | null> => {
@@ -162,5 +174,88 @@ export const fetchPlaceDetails = async (placeId: string): Promise<string | null>
     } catch (error) {
         console.error('Error fetching place details:', error);
         return null;
+    }
+};
+
+export const searchPlacesByText = async (
+    query: string,
+    latitude: number,
+    longitude: number
+): Promise<Place[]> => {
+    if (!GOOGLE_PLACES_API_KEY) {
+        throw new Error('API Key missing');
+    }
+
+    const url = 'https://places.googleapis.com/v1/places:searchText';
+
+    const requestBody = {
+        textQuery: query,
+        maxResultCount: 20,
+        locationBias: {
+            circle: {
+                center: {
+                    latitude: latitude,
+                    longitude: longitude
+                },
+                radius: 5000 // Bias to 5km radius around user
+            }
+        }
+    };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': GOOGLE_PLACES_API_KEY,
+                'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount,places.priceLevel,places.regularOpeningHours,places.photos,places.editorialSummary'
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+            console.error('Places V1 Search API Error:', data.error);
+            throw new Error(data.error.message || 'Places API Error');
+        }
+
+        const places: Place[] = (data.places || []).map((place: any) => {
+            // Helper to map Price Level Enum to Number
+            let priceLevel = undefined;
+            const pLevel = place.priceLevel;
+            if (pLevel === 'PRICE_LEVEL_INEXPENSIVE') priceLevel = 1;
+            else if (pLevel === 'PRICE_LEVEL_MODERATE') priceLevel = 2;
+            else if (pLevel === 'PRICE_LEVEL_EXPENSIVE') priceLevel = 3;
+            else if (pLevel === 'PRICE_LEVEL_VERY_EXPENSIVE') priceLevel = 4;
+
+            return {
+                place_id: place.id,
+                name: place.displayName?.text || 'Unknown Place',
+                vicinity: place.formattedAddress || '',
+                geometry: {
+                    location: {
+                        lat: place.location.latitude,
+                        lng: place.location.longitude,
+                    },
+                },
+                rating: place.rating,
+                user_ratings_total: place.userRatingCount,
+                price_level: priceLevel,
+                photos: place.photos ? place.photos.map((p: any) => ({ name: p.name })) : undefined,
+                types: place.types,
+                opening_hours: place.regularOpeningHours ? {
+                    open_now: place.regularOpeningHours.openNow,
+                    weekday_text: place.regularOpeningHours.weekdayDescriptions
+                } : undefined,
+                summary: place.editorialSummary?.text
+            };
+        });
+
+        return places;
+
+    } catch (error) {
+        console.error('Error searching places:', error);
+        throw error;
     }
 };
