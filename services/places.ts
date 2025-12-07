@@ -29,7 +29,7 @@ const GOOGLE_PLACES_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
 export const fetchNearbyPlaces = async (
     latitude: number,
     longitude: number,
-    radius: number = 50, // Default 50m as per PRD
+    radius: number = 300, // Increased to 300m to find nearby canteens/bars
     type: string = '' // Optional filter
 ): Promise<Place[]> => {
     if (!GOOGLE_PLACES_API_KEY) {
@@ -49,21 +49,34 @@ export const fetchNearbyPlaces = async (
         const data = await response.json();
 
         if (data.status === 'OK') {
-            // Filter out pure political/region results to avoid "Prague", "Prague 1", etc.
-            const excludedTypes = new Set([
-                'locality',
-                'political',
-                'sublocality',
-                'sublocality_level_1',
-                'administrative_area_level_1',
-                'administrative_area_level_2',
-                'postal_code',
-                'country'
+            // STRICT WHITELIST: Only curated "Happy" places.
+            const allowedTypes = new Set([
+                'cafe',
+                'restaurant',
+                'bar',
+                'bakery',
+                'park',
+                'tourist_attraction',
+                'museum',
+                'art_gallery',
+                'night_club',
+                'food',      // Catches generic food spots (canteens)
+                'stadium'    // Catches Strahov Stadium
             ]);
+
+            const keywords = [
+                'club', 'bar', 'pub', 'lounge', 'grill', 'bistro',
+                'menza', 'canteen', 'pivnice', 'restaurace', // Czech
+                'ristorante', 'trattoria', 'osteria', // Italian
+                'brasserie', // French
+                'cafe', 'coffee', 'tea', 'gelateria', 'ice cream'
+            ];
 
             const places: Place[] = data.results
                 .filter((result: any) => {
-                    return !result.types.some((t: string) => excludedTypes.has(t));
+                    const typeMatch = result.types.some((t: string) => allowedTypes.has(t));
+                    const nameMatch = keywords.some(k => result.name.toLowerCase().includes(k));
+                    return typeMatch || nameMatch;
                 })
                 .map((result: any) => ({
                     place_id: result.place_id,

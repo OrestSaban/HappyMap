@@ -5,9 +5,9 @@ import { fetchNearbyPlaces, fetchPlaceDetails, Place } from '@/services/places';
 import { getSavedPlaces, removePlace, savePlace } from '@/services/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, LayoutAnimation, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, LayoutAnimation, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 
 const CATEGORIES = [
   { id: 'all', label: 'All', types: [], icon: 'grid-outline' },
@@ -28,23 +28,27 @@ export default function TabOneScreen() {
   const [isPlacesLoading, setIsPlacesLoading] = useState(false);
   const [scanStatus, setScanStatus] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
 
   const handleScan = async () => {
     setPlaces([]);
+    setSearchQuery('');
     setScanStatus('Acquiring User Location...');
     await requestLocation();
   };
 
-  useEffect(() => {
-    const loadSaved = async () => {
-      const saved = await getSavedPlaces();
-      setSavedPlaceIds(new Set(saved.map(p => p.place_id)));
-    };
-    loadSaved();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      const loadSaved = async () => {
+        const saved = await getSavedPlaces();
+        setSavedPlaceIds(new Set(saved.map(p => p.place_id)));
+      };
+      loadSaved();
+    }, [])
+  );
 
   useEffect(() => {
     if (location) {
@@ -52,7 +56,7 @@ export default function TabOneScreen() {
         setScanStatus('Fetching nearby places...');
         setIsPlacesLoading(true);
         try {
-          const results = await fetchNearbyPlaces(location.latitude, location.longitude, 100, '');
+          const results = await fetchNearbyPlaces(location.latitude, location.longitude, 300, '');
           setPlaces(results);
           setScanStatus(results.length > 0 ? `Found ${results.length} places!` : 'No places found nearby.');
         } catch (e) {
@@ -118,20 +122,63 @@ export default function TabOneScreen() {
     });
   };
 
-  const filteredPlaces = places.filter(place => {
-    if (selectedCategory === 'all') return true;
-    const CategoryObj = CATEGORIES.find(c => c.id === selectedCategory);
-    if (!CategoryObj) return true;
-    return place.types.some(t => CategoryObj.types.includes(t));
-  });
+  const filteredPlaces = places
+    .filter(place => {
+      // 1. Filter by Category
+      if (selectedCategory !== 'all') {
+        const CategoryObj = CATEGORIES.find(c => c.id === selectedCategory);
+        if (CategoryObj && !place.types.some(t => CategoryObj.types.includes(t))) {
+          return false;
+        }
+      }
+      // 2. Filter by Search Query
+      if (searchQuery.trim().length > 0) {
+        const query = searchQuery.toLowerCase();
+        return place.name.toLowerCase().includes(query);
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      // Sort by Rating (Descending), places with no rating go last
+      const ratingA = a.rating || 0;
+      const ratingB = b.rating || 0;
+      return ratingB - ratingA;
+    });
 
   const isLoading = isLocationLoading || isPlacesLoading;
   const hasPerformedScan = places.length > 0 || scanStatus.includes('No places');
-
-  // Logic: Show Scan Button if we haven't scanned yet, OR if we scanned effectively but found nothing (and user clears filter or decides to rescan)
-  // Logic Fix: If we HAVE places (`places.length > 0`) but filtered list is empty, SHOW "No Results in Category" message.
-
   const showScanButton = !hasPerformedScan && places.length === 0;
+
+  // Helper to render stars
+  const renderRating = (rating?: number, total?: number) => {
+    if (!rating) return null;
+    return (
+      <View style={styles.ratingContainer}>
+        <Ionicons name="star" size={12} color="#FFD700" />
+        <Text style={[styles.ratingText, { color: theme.text }]}>{rating}</Text>
+        {total ? <Text style={[styles.ratingCount, { color: theme.textLight }]}>({total})</Text> : null}
+      </View>
+    );
+  };
+
+  // Helper for Price Level
+  const renderPrice = (level?: number) => {
+    if (level === undefined) return null;
+    const dollars = '$'.repeat(level || 1);
+    return <Text style={[styles.priceText, { color: theme.textLight }]}>{dollars}</Text>;
+  };
+
+  // Helper for Open Status
+  const renderOpenStatus = (openNow?: boolean) => {
+    if (openNow === undefined) return null;
+    return (
+      <View style={[styles.badge, openNow ? { backgroundColor: '#E6F8EF' } : { backgroundColor: '#FFF5F5' }]}>
+        <Text style={[styles.badgeText, openNow ? { color: '#00B894' } : { color: '#FF7675' }]}>
+          {openNow ? 'Open Now' : 'Closed'}
+        </Text>
+      </View>
+    );
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -202,60 +249,108 @@ export default function TabOneScreen() {
           <View style={{ flex: 1 }}>
             {/* If we have places but filter returns none */}
             {!isLoading && places.length > 0 && filteredPlaces.length === 0 ? (
-              <View style={styles.emptyStateContainer}>
-                <Ionicons name="search-outline" size={48} color={theme.textLight} />
-                <Text style={[styles.emptyStateText, { color: theme.text }]}>
-                  No {CATEGORIES.find(c => c.id === selectedCategory)?.label} found nearby.
-                </Text>
-                <TouchableOpacity onPress={() => setSelectedCategory('all')}>
-                  <Text style={[styles.clearText, { color: theme.primary, marginTop: 10 }]}>View All Places</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <ScrollView
-                style={styles.resultsList}
-                contentContainerStyle={styles.resultsContent}
-                showsVerticalScrollIndicator={false}
-              >
-                <View style={styles.listHeader}>
-                  <Text style={[styles.resultsTitle, { color: theme.text }]}>
-                    Found {filteredPlaces.length} places
-                  </Text>
-                  <TouchableOpacity onPress={() => { setPlaces([]); setScanStatus(''); }}>
-                    <Text style={[styles.clearText, { color: theme.primary }]}>Clear & Rescan</Text>
-                  </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <View style={styles.searchContainer}>
+                  <View style={[styles.searchInputWrapper, { backgroundColor: theme.card, borderColor: theme.textLight }]}>
+                    <Ionicons name="search" size={20} color={theme.textLight} style={{ marginRight: 10 }} />
+                    <TextInput
+                      style={[styles.searchInput, { color: theme.text }]}
+                      placeholder="Search found places..."
+                      placeholderTextColor={theme.textLight}
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                    />
+                    {searchQuery.length > 0 && (
+                      <TouchableOpacity onPress={() => setSearchQuery('')}>
+                        <Ionicons name="close-circle" size={20} color={theme.textLight} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
 
-                {filteredPlaces.map((place) => {
-                  const isSaved = savedPlaceIds.has(place.place_id);
-                  return (
-                    <View key={place.place_id} style={[styles.card, { backgroundColor: theme.card, shadowColor: theme.text }]}>
-                      <TouchableOpacity style={styles.cardContent} onPress={() => handlePlacePress(place)}>
-                        <View style={[styles.cardIcon, { backgroundColor: theme.background }]}>
-                          <Ionicons name="location" size={24} color={theme.accent} />
-                        </View>
-                        <View style={styles.cardText}>
-                          <Text style={[styles.placeName, { color: theme.text }]} numberOfLines={1}>{place.name}</Text>
-                          <Text style={[styles.placeVicinity, { color: theme.textLight }]} numberOfLines={1}>{place.vicinity}</Text>
-                          <View style={[styles.tagContainer, { backgroundColor: theme.background }]}>
-                            <Text style={[styles.categoryTag, { color: theme.primary }]}>{place.types[0]?.replace('_', ' ')}</Text>
+                <View style={styles.emptyStateContainer}>
+                  <Ionicons name="search-outline" size={48} color={theme.textLight} />
+                  <Text style={[styles.emptyStateText, { color: theme.text }]}>
+                    No matches found.
+                  </Text>
+                  <TouchableOpacity onPress={() => { setSelectedCategory('all'); setSearchQuery(''); }}>
+                    <Text style={[styles.clearText, { color: theme.primary, marginTop: 10 }]}>Clear Filters</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={{ flex: 1 }}>
+                <View style={styles.searchContainer}>
+                  <View style={[styles.searchInputWrapper, { backgroundColor: theme.card, borderColor: theme.textLight }]}>
+                    <Ionicons name="search" size={20} color={theme.textLight} style={{ marginRight: 10 }} />
+                    <TextInput
+                      style={[styles.searchInput, { color: theme.text }]}
+                      placeholder="Search found places..."
+                      placeholderTextColor={theme.textLight}
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                    />
+                    {searchQuery.length > 0 && (
+                      <TouchableOpacity onPress={() => setSearchQuery('')}>
+                        <Ionicons name="close-circle" size={20} color={theme.textLight} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+
+                <ScrollView
+                  style={styles.resultsList}
+                  contentContainerStyle={styles.resultsContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <View style={styles.listHeader}>
+                    <Text style={[styles.resultsTitle, { color: theme.text }]}>
+                      Found {filteredPlaces.length} places
+                    </Text>
+                    <TouchableOpacity onPress={() => { setPlaces([]); setScanStatus(''); setSearchQuery(''); }}>
+                      <Text style={[styles.clearText, { color: theme.primary }]}>Clear & Rescan</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {filteredPlaces.map((place) => {
+                    const isSaved = savedPlaceIds.has(place.place_id);
+                    return (
+                      <View key={place.place_id} style={[styles.card, { backgroundColor: theme.card, shadowColor: theme.text }]}>
+                        <TouchableOpacity style={styles.cardContent} onPress={() => handlePlacePress(place)}>
+                          <View style={[styles.cardIcon, { backgroundColor: theme.background }]}>
+                            <Ionicons name="location" size={24} color={theme.accent} />
                           </View>
-                        </View>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.heartButton} onPress={() => toggleSave(place)}>
-                        <Ionicons
-                          name={isSaved ? "heart" : "heart-outline"}
-                          size={28}
-                          color={theme.primary}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-                <View style={{ height: 100 }} />
-              </ScrollView>
+                          <View style={styles.cardText}>
+                            <Text style={[styles.placeName, { color: theme.text }]} numberOfLines={1}>{place.name}</Text>
+                            <Text style={[styles.placeVicinity, { color: theme.textLight }]} numberOfLines={1}>{place.vicinity}</Text>
+
+                            <View style={styles.detailRow}>
+                              {renderRating(place.rating, place.user_ratings_total)}
+                              {renderPrice(place.price_level)}
+                            </View>
+
+                            <View style={styles.metaRow}>
+                              <View style={[styles.tagContainer, { backgroundColor: theme.background }]}>
+                                <Text style={[styles.categoryTag, { color: theme.primary }]}>{place.types[0]?.replace('_', ' ')}</Text>
+                              </View>
+                              {renderOpenStatus(place.opening_hours?.open_now)}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.heartButton} onPress={() => toggleSave(place)}>
+                          <Ionicons
+                            name={isSaved ? "heart" : "heart-outline"}
+                            size={28}
+                            color={theme.primary}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                  <View style={{ height: 100 }} />
+                </ScrollView>
+              </View>
             )}
-            {/* Loading State Overlay if needed, usually handled by scan button replacement but here for location updates */}
             {isLoading && (
               <View style={[styles.loadingOverlay, { backgroundColor: theme.background }]}>
                 <ActivityIndicator size="large" color={theme.primary} />
@@ -353,6 +448,23 @@ const styles = StyleSheet.create({
     color: '#FF4B4B',
     marginTop: 10,
   },
+  searchContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+  },
+  searchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 48,
+    borderWidth: 1,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    height: '100%',
+  },
   resultsList: {
     flex: 1,
     paddingHorizontal: 20,
@@ -387,7 +499,7 @@ const styles = StyleSheet.create({
   cardContent: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start', // Align to top
   },
   cardIcon: {
     width: 40,
@@ -396,6 +508,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 15,
+    marginTop: 4,
   },
   cardText: {
     flex: 1,
@@ -409,6 +522,34 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 6,
   },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 10,
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  ratingText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  ratingCount: {
+    fontSize: 12,
+  },
+  priceText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 10,
+  },
   tagContainer: {
     alignSelf: 'flex-start',
     paddingHorizontal: 8,
@@ -416,6 +557,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   categoryTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  badgeText: {
     fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase',
