@@ -29,80 +29,94 @@ const GOOGLE_PLACES_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
 export const fetchNearbyPlaces = async (
     latitude: number,
     longitude: number,
-    radius: number = 300, // Increased to 300m to find nearby canteens/bars
-    type: string = '' // Optional filter
+    radius: number = 300,
+    type: string = '' // Unused in V1 strict mode, kept for signature compatibility
 ): Promise<Place[]> => {
     if (!GOOGLE_PLACES_API_KEY) {
         console.error('Google Places API Key is missing!');
         throw new Error('API Key missing');
     }
 
-    // Build URL for Nearby Search (Legacy)
-    let url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=${radius}&key=${GOOGLE_PLACES_API_KEY}`;
+    const url = 'https://places.googleapis.com/v1/places:searchNearby';
 
-    if (type && type !== 'all') {
-        url += `&type=${type}`;
-    }
+    // Strict Whitelist for V1 API
+    const includedTypes = [
+        'restaurant',
+        'cafe',
+        'bar',
+        'bakery',
+        'park',
+        'tourist_attraction',
+        'museum',
+        'art_gallery',
+        'night_club',
+        'stadium'
+    ];
+
+    const requestBody = {
+        includedTypes: includedTypes,
+        maxResultCount: 20,
+        locationRestriction: {
+            circle: {
+                center: {
+                    latitude: latitude,
+                    longitude: longitude
+                },
+                radius: radius
+            }
+        }
+    };
 
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': GOOGLE_PLACES_API_KEY,
+                'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount,places.priceLevel,places.regularOpeningHours,places.photos'
+            },
+            body: JSON.stringify(requestBody)
+        });
+
         const data = await response.json();
 
-        if (data.status === 'OK') {
-            // STRICT WHITELIST: Only curated "Happy" places.
-            const allowedTypes = new Set([
-                'cafe',
-                'restaurant',
-                'bar',
-                'bakery',
-                'park',
-                'tourist_attraction',
-                'museum',
-                'art_gallery',
-                'night_club',
-                'food',      // Catches generic food spots (canteens)
-                'stadium'    // Catches Strahov Stadium
-            ]);
-
-            const keywords = [
-                'club', 'bar', 'pub', 'lounge', 'grill', 'bistro',
-                'menza', 'canteen', 'pivnice', 'restaurace', // Czech
-                'ristorante', 'trattoria', 'osteria', // Italian
-                'brasserie', // French
-                'cafe', 'coffee', 'tea', 'gelateria', 'ice cream'
-            ];
-
-            const places: Place[] = data.results
-                .filter((result: any) => {
-                    const typeMatch = result.types.some((t: string) => allowedTypes.has(t));
-                    const nameMatch = keywords.some(k => result.name.toLowerCase().includes(k));
-                    return typeMatch || nameMatch;
-                })
-                .map((result: any) => ({
-                    place_id: result.place_id,
-                    name: result.name,
-                    vicinity: result.vicinity || result.formatted_address,
-                    plus_code: result.plus_code,
-                    geometry: {
-                        location: {
-                            lat: result.geometry.location.lat,
-                            lng: result.geometry.location.lng,
-                        },
-                    },
-                    rating: result.rating,
-                    user_ratings_total: result.user_ratings_total,
-                    price_level: result.price_level,
-                    photos: result.photos,
-                    types: result.types,
-                    opening_hours: result.opening_hours,
-                }));
-            return places;
-        } else if (data.status === 'ZERO_RESULTS') {
-            return [];
-        } else {
-            console.error('Places API Error:', data.status, data.error_message);
-            throw new Error(data.error_message || 'Places API Error');
+        if (data.error) {
+            console.error('Places V1 API Error:', data.error);
+            throw new Error(data.error.message || 'Places API Error');
         }
+
+        const places: Place[] = (data.places || []).map((place: any) => {
+            // Helper to map Price Level Enum to Number
+            let priceLevel = undefined;
+            const pLevel = place.priceLevel;
+            if (pLevel === 'PRICE_LEVEL_INEXPENSIVE') priceLevel = 1;
+            else if (pLevel === 'PRICE_LEVEL_MODERATE') priceLevel = 2;
+            else if (pLevel === 'PRICE_LEVEL_EXPENSIVE') priceLevel = 3;
+            else if (pLevel === 'PRICE_LEVEL_VERY_EXPENSIVE') priceLevel = 4;
+
+            return {
+                place_id: place.id,
+                name: place.displayName?.text || 'Unknown Place',
+                vicinity: place.formattedAddress || '',
+                // V1 doesn't return plus_code in standard mask easily, skipping or needs extra field. 
+                // For now, keeping structure compatible.
+                geometry: {
+                    location: {
+                        lat: place.location.latitude,
+                        lng: place.location.longitude,
+                    },
+                },
+                rating: place.rating,
+                user_ratings_total: place.userRatingCount,
+                price_level: priceLevel,
+                photos: place.photos ? place.photos.map((p: any) => ({ photo_reference: p.name })) : undefined, // V1 photos use 'name' as resource ID
+                types: place.types,
+                opening_hours: place.regularOpeningHours ? { open_now: place.regularOpeningHours.openNow } : undefined,
+            };
+        });
+
+        return places;
+
     } catch (error) {
         console.error('Error fetching places:', error);
         throw error;
