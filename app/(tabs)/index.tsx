@@ -170,16 +170,33 @@ export default function TabOneScreen() {
   };
 
   const handlePlacePress = (place: Place) => {
-    router.push({
-      pathname: '/modal',
-      params: {
-        place_id: place.place_id,
-        name: place.name,
-        vicinity: place.vicinity,
-        lat: place.geometry.location.lat,
-        lng: place.geometry.location.lng,
-      }
-    });
+    const isToilet = place.types.includes('toilet') || place.types.includes('restroom');
+
+    if (isToilet) {
+      // Route to toilet-specific half-sheet modal
+      router.push({
+        pathname: '/toilet-modal',
+        params: {
+          name: place.name,
+          vicinity: place.vicinity,
+          lat: place.geometry.location.lat,
+          lng: place.geometry.location.lng,
+          distance: place.distance ? formatDistance(place.distance) : undefined,
+        }
+      });
+    } else {
+      // Regular places go to full modal
+      router.push({
+        pathname: '/modal',
+        params: {
+          place_id: place.place_id,
+          name: place.name,
+          vicinity: place.vicinity,
+          lat: place.geometry.location.lat,
+          lng: place.geometry.location.lng,
+        }
+      });
+    }
   };
 
   const filteredPlaces = places
