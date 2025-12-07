@@ -3,6 +3,7 @@ import Colors from '@/constants/Colors';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { fetchNearbyPlaces, fetchPlaceDetails, getPlacePhotoUrl, Place, searchPlacesByText } from '@/services/places';
 import { getSavedPlaces, removePlace, savePlace } from '@/services/storage';
+import { fetchNearbyToilets } from '@/services/toilets';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -15,6 +16,7 @@ const CATEGORIES = [
   { id: 'restaurant', label: 'Food', types: ['restaurant', 'food'], icon: 'restaurant-outline' },
   { id: 'bar', label: 'Bars', types: ['bar', 'night_club'], icon: 'wine-outline' },
   { id: 'park', label: 'Parks', types: ['park'], icon: 'leaf-outline' },
+  { id: 'toilet', label: 'Toilets', types: ['toilet', 'restroom'], icon: 'water-outline', isOSM: true },
 ];
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -75,22 +77,57 @@ export default function TabOneScreen() {
   useEffect(() => {
     if (location) {
       const getPlaces = async () => {
-        setScanStatus('Fetching nearby places...');
-        setIsPlacesLoading(true);
-        try {
-          const results = await fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, '');
-          setPlaces(results);
-          setScanStatus(results.length > 0 ? `Found ${results.length} places!` : 'No places found nearby.');
-        } catch (e) {
-          setScanStatus('Error fetching places');
-          console.error(e);
-        } finally {
-          setIsPlacesLoading(false);
+        // If toilet category is selected, fetch toilets from OSM
+        if (selectedCategory === 'toilet') {
+          setScanStatus('Searching for toilets (OpenStreetMap)...');
+          setIsPlacesLoading(true);
+          try {
+            const toilets = await fetchNearbyToilets(location.latitude, location.longitude, searchRadius);
+            setPlaces(toilets);
+            setScanStatus(toilets.length > 0 ? `Found ${toilets.length} toilets nearby!` : 'No toilets found nearby.');
+          } catch (e) {
+            setScanStatus('Error fetching toilets');
+            console.error(e);
+          } finally {
+            setIsPlacesLoading(false);
+          }
+        } else {
+          // Fetch regular places from Google
+          setScanStatus('Fetching nearby places...');
+          setIsPlacesLoading(true);
+          try {
+            const results = await fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, '');
+            setPlaces(results);
+            setScanStatus(results.length > 0 ? `Found ${results.length} places!` : 'No places found nearby.');
+          } catch (e) {
+            setScanStatus('Error fetching places');
+            console.error(e);
+          } finally {
+            setIsPlacesLoading(false);
+          }
         }
       };
       getPlaces();
     }
-  }, [location]);
+  }, [location, searchRadius, selectedCategory]);
+
+  // Fetch toilets when toilet category is selected
+  const handleToiletSearch = async () => {
+    if (!location) return;
+    setPlaces([]);
+    setScanStatus('Searching for toilets (OpenStreetMap)...');
+    setIsPlacesLoading(true);
+    try {
+      const toilets = await fetchNearbyToilets(location.latitude, location.longitude, searchRadius);
+      setPlaces(toilets);
+      setScanStatus(toilets.length > 0 ? `Found ${toilets.length} toilets nearby!` : 'No toilets found nearby.');
+    } catch (e) {
+      setScanStatus('Error fetching toilets');
+      console.error(e);
+    } finally {
+      setIsPlacesLoading(false);
+    }
+  };
 
   const toggleSave = async (place: Place) => {
     const isSaved = savedPlaceIds.has(place.place_id);
@@ -129,6 +166,7 @@ export default function TabOneScreen() {
   const handleCategorySelect = (id: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setSelectedCategory(id);
+    // Toilet search will be triggered by SCAN button, not category toggle
   };
 
   const handlePlacePress = (place: Place) => {
@@ -396,15 +434,20 @@ export default function TabOneScreen() {
                   {filteredPlaces.map((place) => {
                     const isSaved = savedPlaceIds.has(place.place_id);
                     const photoUrl = place.photos?.[0]?.name ? getPlacePhotoUrl(place.photos[0].name) : null;
+                    const isToilet = place.types.includes('toilet') || place.types.includes('restroom');
 
                     return (
                       <View key={place.place_id} style={[styles.card, { backgroundColor: theme.card, shadowColor: theme.text }]}>
                         <TouchableOpacity style={styles.cardContent} onPress={() => handlePlacePress(place)}>
-                          {photoUrl ? (
+                          {photoUrl && !isToilet ? (
                             <Image source={{ uri: photoUrl }} style={styles.cardInfoImage} />
                           ) : (
-                            <View style={[styles.cardIcon, { backgroundColor: theme.background }]}>
-                              <Ionicons name="location" size={24} color={theme.accent} />
+                            <View style={[styles.cardIcon, { backgroundColor: isToilet ? '#E3F2FD' : theme.background }]}>
+                              <Ionicons
+                                name={isToilet ? "water" : "location"}
+                                size={24}
+                                color={isToilet ? "#2196F3" : theme.accent}
+                              />
                             </View>
                           )}
 

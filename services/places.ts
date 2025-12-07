@@ -76,6 +76,7 @@ export const fetchNearbyPlaces = async (
         includedTypes: includedTypes,
         maxResultCount: 20,
         rankPreference: 'DISTANCE',
+        languageCode: 'en',
         locationRestriction: {
             circle: {
                 center: {
@@ -208,6 +209,7 @@ export const searchPlacesByText = async (
     const requestBody = {
         textQuery: query,
         maxResultCount: 20,
+        languageCode: 'en',
         locationBias: {
             circle: {
                 center: {

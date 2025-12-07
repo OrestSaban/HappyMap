@@ -2,40 +2,95 @@ import { Alert, Linking, Platform } from 'react-native';
 
 export const openMapsApp = async (lat: number, lng: number, label: string) => {
     const latLng = `${lat},${lng}`;
-    const labelEncoded = encodeURIComponent(label);
+    // Strip emojis and special characters from label for URL safety
+    const cleanLabel = label.replace(/[^\w\s-]/g, '').trim() || 'Destination';
+    const labelEncoded = encodeURIComponent(cleanLabel);
 
-    // Use maps: scheme for Apple Maps which is more robust on Simulator/Device
-    const appleUrl = `maps:0,0?q=${labelEncoded}&ll=${lat},${lng}`;
-    const googleUrl = `comgooglemaps://?q=${latLng}(${labelEncoded})&center=${latLng}&zoom=14&views=traffic`;
+    // Apple Maps URL (https works on device, may not on simulator)
+    const appleUrl = `https://maps.apple.com/?ll=${lat},${lng}&q=${labelEncoded}`;
+
+    // Google Maps - try app first, fallback to web
+    const googleAppUrl = `comgooglemaps://?q=${latLng}&center=${latLng}&zoom=14`;
+    const googleWebUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+
+    const openWithFallback = async (url: string, fallbackUrl: string | null, appName: string) => {
+        try {
+            const supported = await Linking.canOpenURL(url);
+            if (supported) {
+                await Linking.openURL(url);
+            } else if (fallbackUrl) {
+                // Try web fallback
+                const webSupported = await Linking.canOpenURL(fallbackUrl);
+                if (webSupported) {
+                    await Linking.openURL(fallbackUrl);
+                } else {
+                    showCoordinatesAlert(lat, lng, cleanLabel, appName);
+                }
+            } else {
+                showCoordinatesAlert(lat, lng, cleanLabel, appName);
+            }
+        } catch (err) {
+            console.error(`Error opening ${appName}`, err);
+            if (fallbackUrl) {
+                try {
+                    await Linking.openURL(fallbackUrl);
+                } catch {
+                    showCoordinatesAlert(lat, lng, cleanLabel, appName);
+                }
+            } else {
+                showCoordinatesAlert(lat, lng, cleanLabel, appName);
+            }
+        }
+    };
+
+    const showCoordinatesAlert = (lat: number, lng: number, label: string, appName: string) => {
+        Alert.alert(
+            `Can't Open ${appName}`,
+            `This may be a simulator limitation.\n\nCoordinates:\n${lat}, ${lng}\n\n${label}`,
+            [{ text: 'OK' }]
+        );
+    };
 
     if (Platform.OS === 'ios') {
-        const canOpenGoogleMaps = await Linking.canOpenURL('comgooglemaps://');
-
-        if (canOpenGoogleMaps) {
-            Alert.alert(
-                'Navigate with...',
-                'Choose your preferred maps app',
-                [
-                    {
-                        text: 'Apple Maps',
-                        onPress: () => Linking.openURL(appleUrl).catch(err => console.error("Error opening Apple Maps", err))
-                    },
-                    {
-                        text: 'Google Maps',
-                        onPress: () => Linking.openURL(googleUrl).catch(err => console.error("Error opening Google Maps", err))
-                    },
-                    {
-                        text: 'Cancel',
-                        style: 'cancel'
-                    }
-                ]
-            );
-        } else {
-            Linking.openURL(appleUrl).catch(err => console.error("Error opening Apple Maps", err));
-        }
+        // Always show choice on iOS
+        Alert.alert(
+            'Navigate with...',
+            'Choose your preferred maps app',
+            [
+                {
+                    text: 'Apple Maps',
+                    onPress: () => openWithFallback(appleUrl, null, 'Apple Maps')
+                },
+                {
+                    text: 'Google Maps',
+                    onPress: () => openWithFallback(googleAppUrl, googleWebUrl, 'Google Maps')
+                },
+                {
+                    text: 'Cancel',
+                    style: 'cancel'
+                }
+            ]
+        );
     } else {
-        // Android - Intent usually handles choice
+        // Android - Always show choice
         const androidUrl = `geo:${latLng}?q=${latLng}(${labelEncoded})`;
-        Linking.openURL(androidUrl).catch(err => console.error("Error opening Android Maps", err));
+        Alert.alert(
+            'Navigate with...',
+            'Choose your preferred maps app',
+            [
+                {
+                    text: 'Default Maps',
+                    onPress: () => openWithFallback(androidUrl, null, 'Maps')
+                },
+                {
+                    text: 'Google Maps',
+                    onPress: () => openWithFallback(googleWebUrl, null, 'Google Maps')
+                },
+                {
+                    text: 'Cancel',
+                    style: 'cancel'
+                }
+            ]
+        );
     }
 };

@@ -33,9 +33,9 @@ export default function ModalScreen() {
     const loadDetails = async () => {
       if (!placeId) return;
       try {
-        // Fetch precise details using V1 API
+        // Fetch precise details using V1 API with English language
         const url = `https://places.googleapis.com/v1/places/${placeId}`;
-        const response = await fetch(`${url}?fields=id,displayName,formattedAddress,location,types,rating,userRatingCount,priceLevel,regularOpeningHours,photos,editorialSummary&key=${GOOGLE_API_KEY}`);
+        const response = await fetch(`${url}?fields=id,displayName,formattedAddress,location,types,rating,userRatingCount,priceLevel,regularOpeningHours,photos,editorialSummary&languageCode=en&key=${GOOGLE_API_KEY}`);
         const data = await response.json();
 
         setDetails(data);
@@ -77,116 +77,78 @@ export default function ModalScreen() {
     if (p === 'PRICE_LEVEL_VERY_EXPENSIVE') priceStr = '$$$$';
   }
 
+  // Detect if this is a toilet from OSM (place_id starts with 'osm_')
+  const isToiletPlace = placeId?.startsWith('osm_');
+
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <StatusBar style={Platform.OS === 'ios' ? 'light' : 'auto'} />
 
-      {/* Hero Image Carousel */}
-      <View style={styles.imageContainer}>
-        {photos.length > 0 ? (
-          <ScrollView
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            style={styles.scrollView}
-          >
-            {photos.map((photo: any, index: number) => (
-              <Image
-                key={index}
-                source={{ uri: getPhotoUrl(photo.name) }}
-                style={styles.heroImage}
-                resizeMode="cover"
-              />
-            ))}
-          </ScrollView>
-        ) : (
-          <LinearGradient colors={[theme.primary, theme.secondary]} style={styles.heroPlaceholder}>
-            <Ionicons name="image-outline" size={64} color="#fff" />
-          </LinearGradient>
-        )}
+      {/* Hero Image Carousel - Skip for toilets */}
+      {!isToiletPlace ? (
+        <View style={styles.imageContainer}>
+          {photos.length > 0 ? (
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              style={styles.scrollView}
+            >
+              {photos.map((photo: any, index: number) => (
+                <Image
+                  key={index}
+                  source={{ uri: getPhotoUrl(photo.name) }}
+                  style={styles.heroImage}
+                  resizeMode="cover"
+                />
+              ))}
+            </ScrollView>
+          ) : (
+            <LinearGradient colors={[theme.primary, theme.secondary]} style={styles.heroPlaceholder}>
+              <Ionicons name="image-outline" size={64} color="#fff" />
+            </LinearGradient>
+          )}
 
-        {/* Pagination Dots */}
-        {photos.length > 1 && (
-          <View style={styles.pagination}>
-            {photos.map((_: any, index: number) => (
-              <View
-                key={index}
-                style={[
-                  styles.dot,
-                  index === activeSlide ? styles.activeDot : styles.inactiveDot
-                ]}
-              />
-            ))}
-          </View>
-        )}
-
-        <TouchableOpacity style={styles.closeButton} onPress={() => router.back()}>
-          <Ionicons name="close" size={28} color="#fff" />
-        </TouchableOpacity>
-      </View>
-
-      <View style={[styles.contentContainer, { backgroundColor: theme.background }]}>
-        {loading ? (
-          <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
-        ) : (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            {/* Title & Metadata */}
-            <Text style={[styles.title, { color: theme.text }]}>{details?.displayName?.text || initialName}</Text>
-            <Text style={[styles.address, { color: theme.textLight }]}>{details?.formattedAddress || params.vicinity}</Text>
-
-            {/* Chips Row */}
-            <View style={styles.chipsRow}>
-              {details?.rating && (
-                <View style={[styles.chip, { backgroundColor: '#FFF9C4' }]}>
-                  <Ionicons name="star" size={14} color="#FBC02D" />
-                  <Text style={[styles.chipText, { color: '#F57F17' }]}>{details.rating} ({details.userRatingCount})</Text>
-                </View>
-              )}
-
-              {priceStr ? (
-                <View style={[styles.chip, { backgroundColor: '#E0F2F1' }]}>
-                  <Text style={[styles.chipText, { color: '#00897B' }]}>{priceStr}</Text>
-                </View>
-              ) : null}
-
-              {details?.regularOpeningHours && (
-                <View style={[styles.chip, openNow ? { backgroundColor: '#E8F5E9' } : { backgroundColor: '#FFEBEE' }]}>
-                  <Text style={[styles.chipText, openNow ? { color: '#2E7D32' } : { color: '#C62828' }]}>
-                    {openNow ? 'Open Now' : 'Closed'}
-                  </Text>
-                </View>
-              )}
+          {/* Pagination Dots */}
+          {photos.length > 1 && (
+            <View style={styles.pagination}>
+              {photos.map((_: any, index: number) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.dot,
+                    index === activeSlide ? styles.activeDot : styles.inactiveDot
+                  ]}
+                />
+              ))}
             </View>
+          )}
 
-            <View style={styles.divider} />
+          <TouchableOpacity style={styles.closeButton} onPress={() => router.back()}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      ) : (
+        // Toilet half-modal style
+        <>
+          <TouchableOpacity
+            style={styles.toiletOverlay}
+            activeOpacity={1}
+            onPress={() => router.back()}
+          />
+          <View style={styles.toiletBottomSheet}>
+            <View style={styles.toiletHandle} />
+            <View style={styles.toiletContent}>
+              <Ionicons name="water" size={48} color="#2196F3" />
+              <Text style={styles.toiletTitle}>{initialName}</Text>
+              <Text style={[styles.toiletAddress, { color: theme.textLight }]}>{params.vicinity}</Text>
+            </View>
+          </View>
 
-            {/* Description */}
-            {details?.editorialSummary?.text && (
-              <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>About</Text>
-                <Text style={[styles.bodyText, { color: theme.textLight }]}>{details.editorialSummary.text}</Text>
-              </View>
-            )}
-
-            {/* Opening Hours */}
-            {details?.regularOpeningHours?.weekdayDescriptions && (
-              <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>Hours</Text>
-                {details.regularOpeningHours.weekdayDescriptions.map((day: string, idx: number) => (
-                  <Text key={idx} style={[styles.hourRow, { color: theme.textLight }]}>{day}</Text>
-                ))}
-              </View>
-            )}
-
-            <View style={{ height: 100 }} />
-          </ScrollView>
-        )}
-
-        {/* Fixed Footer */}
-        <View style={[styles.footer, { borderTopColor: theme.textLight + '20', backgroundColor: theme.background }]}>
-          <TouchableOpacity activeOpacity={0.8} onPress={handleNavigate} style={{ flex: 1 }}>
+          {/* Navigate Button */}
+          <TouchableOpacity activeOpacity={0.8} onPress={handleNavigate} style={{ marginHorizontal: 24, marginTop: 16 }}>
             <LinearGradient
               colors={[theme.primary, theme.secondary]}
               start={{ x: 0, y: 0 }}
@@ -198,8 +160,86 @@ export default function ModalScreen() {
             </LinearGradient>
           </TouchableOpacity>
         </View>
+    </>
+  )
+}
+
+{/* Standard Content - only for non-toilet places */ }
+{
+  !isToiletPlace && (
+    <View style={[styles.contentContainer, { backgroundColor: theme.background }]}>
+      {loading ? (
+        <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {/* Title & Metadata */}
+          <Text style={[styles.title, { color: theme.text }]}>{details?.displayName?.text || initialName}</Text>
+          <Text style={[styles.address, { color: theme.textLight }]}>{details?.formattedAddress || params.vicinity}</Text>
+
+          {/* Chips Row */}
+          <View style={styles.chipsRow}>
+            {details?.rating && (
+              <View style={[styles.chip, { backgroundColor: '#FFF9C4' }]}>
+                <Ionicons name="star" size={14} color="#FBC02D" />
+                <Text style={[styles.chipText, { color: '#F57F17' }]}>{details.rating} ({details.userRatingCount})</Text>
+              </View>
+            )}
+
+            {priceStr ? (
+              <View style={[styles.chip, { backgroundColor: '#E0F2F1' }]}>
+                <Text style={[styles.chipText, { color: '#00897B' }]}>{priceStr}</Text>
+              </View>
+            ) : null}
+
+            {details?.regularOpeningHours && (
+              <View style={[styles.chip, openNow ? { backgroundColor: '#E8F5E9' } : { backgroundColor: '#FFEBEE' }]}>
+                <Text style={[styles.chipText, openNow ? { color: '#2E7D32' } : { color: '#C62828' }]}>
+                  {openNow ? 'Open Now' : 'Closed'}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* Description */}
+          {details?.editorialSummary?.text && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>About</Text>
+              <Text style={[styles.bodyText, { color: theme.textLight }]}>{details.editorialSummary.text}</Text>
+            </View>
+          )}
+
+          {/* Opening Hours */}
+          {details?.regularOpeningHours?.weekdayDescriptions && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Hours</Text>
+              {details.regularOpeningHours.weekdayDescriptions.map((day: string, idx: number) => (
+                <Text key={idx} style={[styles.hourRow, { color: theme.textLight }]}>{day}</Text>
+              ))}
+            </View>
+          )}
+
+          <View style={{ height: 100 }} />
+        </ScrollView>
+      )}
+
+      {/* Fixed Footer */}
+      <View style={[styles.footer, { borderTopColor: theme.textLight + '20', backgroundColor: theme.background }]}>
+        <TouchableOpacity activeOpacity={0.8} onPress={handleNavigate} style={{ flex: 1 }}>
+          <LinearGradient
+            colors={[theme.primary, theme.secondary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.navigateButton}
+          >
+            <Ionicons name="navigate" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.navigateText}>Navigate</Text>
+          </LinearGradient>
+        </TouchableOpacity>
       </View>
     </View>
+    </View >
   );
 }
 
@@ -270,7 +310,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 28,
-    fontWeight: 'Bold',
+    fontWeight: 'bold',
     marginBottom: 4,
   },
   address: {
@@ -348,5 +388,66 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
+  },
+  toiletHeader: {
+    height: 200,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  toiletHeaderText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2196F3',
+    marginTop: 12,
+  },
+  closeButtonDark: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderRadius: 15,
+    padding: 4,
+  },
+  toiletOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  toiletBottomSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 40,
+  },
+  toiletHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  toiletContent: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 20,
+  },
+  toiletTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  toiletAddress: {
+    fontSize: 14,
+    marginTop: 4,
+    textAlign: 'center',
   },
 });
