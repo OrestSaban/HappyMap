@@ -106,7 +106,7 @@ export const fetchNearbyPlaces = async (
             throw new Error(data.error.message || 'Places API Error');
         }
 
-        const places: Place[] = (data.places || []).map((place: any) => {
+        let places: Place[] = (data.places || []).map((place: any) => {
             // Helper to map Price Level Enum to Number
             let priceLevel = undefined;
             const pLevel = place.priceLevel;
@@ -115,12 +115,16 @@ export const fetchNearbyPlaces = async (
             else if (pLevel === 'PRICE_LEVEL_EXPENSIVE') priceLevel = 3;
             else if (pLevel === 'PRICE_LEVEL_VERY_EXPENSIVE') priceLevel = 4;
 
+            // Calculate distance
+            const dist = calculateDistance(
+                latitude, longitude,
+                place.location.latitude, place.location.longitude
+            );
+
             return {
                 place_id: place.id,
                 name: place.displayName?.text || 'Unknown Place',
                 vicinity: place.formattedAddress || '',
-                // V1 doesn't return plus_code in standard mask easily, skipping or needs extra field. 
-                // For now, keeping structure compatible.
                 geometry: {
                     location: {
                         lat: place.location.latitude,
@@ -130,17 +134,29 @@ export const fetchNearbyPlaces = async (
                 rating: place.rating,
                 user_ratings_total: place.userRatingCount,
                 price_level: priceLevel,
-                photos: place.photos ? place.photos.map((p: any) => ({ name: p.name })) : undefined, // V1 photos use 'name' as resource ID
+                photos: place.photos ? place.photos.map((p: any) => ({ name: p.name })) : undefined,
                 types: place.types,
                 opening_hours: place.regularOpeningHours ? {
                     open_now: place.regularOpeningHours.openNow,
                     weekday_text: place.regularOpeningHours.weekdayDescriptions
                 } : undefined,
-                summary: place.editorialSummary?.text
+                summary: place.editorialSummary?.text,
+                distance: dist
             };
         });
 
-        return places;
+        // If no results found and not already at max radius, expand search to 5km
+        if (places.length === 0 && radius < 5000) {
+            console.log('No places in radius, expanding search to 5km...');
+            const expandedPlaces = await fetchNearbyPlaces(latitude, longitude, 5000);
+            // Sort by distance and return 10 closest
+            return expandedPlaces
+                .sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity))
+                .slice(0, 10);
+        }
+
+        // Sort by distance
+        return places.sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
 
     } catch (error) {
         console.error('Error fetching places:', error);

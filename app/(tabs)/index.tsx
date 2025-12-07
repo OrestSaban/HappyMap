@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Image, LayoutAnimation, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
+import { ActivityIndicator, Image, LayoutAnimation, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 
 const CATEGORIES = [
   { id: 'all', label: 'All', types: [], icon: 'grid-outline' },
@@ -26,22 +26,50 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 export default function TabOneScreen() {
   const { location, errorMsg, isLoading: isLocationLoading, requestLocation } = useUserLocation();
   const [places, setPlaces] = useState<Place[]>([]);
+  const [toilets, setToilets] = useState<Place[]>([]);
+  const [toiletsFetched, setToiletsFetched] = useState(false);
   const [savedPlaceIds, setSavedPlaceIds] = useState<Set<string>>(new Set());
   const [isPlacesLoading, setIsPlacesLoading] = useState(false);
   const [scanStatus, setScanStatus] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchRadius, setSearchRadius] = useState<number>(500); // Default 500m
+  const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
 
   const handleScan = async () => {
     setPlaces([]);
+    setToilets([]);
+    setToiletsFetched(false);
     setSearchQuery('');
     setScanStatus('Acquiring User Location...');
     await requestLocation();
   };
+
+  const onRefresh = useCallback(async () => {
+    if (!location) return;
+    setRefreshing(true);
+    setScanStatus('Refreshing...');
+
+    try {
+      // Refresh both Google places and OSM toilets
+      const [googlePlaces, osmToilets] = await Promise.all([
+        fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, ''),
+        fetchNearbyToilets(location.latitude, location.longitude, searchRadius)
+      ]);
+
+      setPlaces(googlePlaces);
+      setToilets(osmToilets);
+      setToiletsFetched(true);
+      setScanStatus(`Found ${googlePlaces.length} places + ${osmToilets.length} toilets!`);
+    } catch (error) {
+      setScanStatus('Error refreshing');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [location, searchRadius]);
 
   const handleGlobalSearch = async () => {
     if (!location || !searchQuery.trim()) return;
@@ -76,40 +104,35 @@ export default function TabOneScreen() {
 
   useEffect(() => {
     if (location) {
-      const getPlaces = async () => {
-        // If toilet category is selected, fetch toilets from OSM
-        if (selectedCategory === 'toilet') {
-          setScanStatus('Searching for toilets (OpenStreetMap)...');
-          setIsPlacesLoading(true);
-          try {
-            const toilets = await fetchNearbyToilets(location.latitude, location.longitude, searchRadius);
-            setPlaces(toilets);
-            setScanStatus(toilets.length > 0 ? `Found ${toilets.length} toilets nearby!` : 'No toilets found nearby.');
-          } catch (e) {
-            setScanStatus('Error fetching toilets');
-            console.error(e);
-          } finally {
-            setIsPlacesLoading(false);
-          }
-        } else {
-          // Fetch regular places from Google
-          setScanStatus('Fetching nearby places...');
-          setIsPlacesLoading(true);
-          try {
-            const results = await fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, '');
-            setPlaces(results);
-            setScanStatus(results.length > 0 ? `Found ${results.length} places!` : 'No places found nearby.');
-          } catch (e) {
-            setScanStatus('Error fetching places');
-            console.error(e);
-          } finally {
-            setIsPlacesLoading(false);
-          }
+      const fetchAll = async () => {
+        setScanStatus('Fetching nearby places...');
+        setIsPlacesLoading(true);
+
+        try {
+          // Fetch both Google places and OSM toilets in parallel
+          const [googlePlaces, osmToilets] = await Promise.all([
+            fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, ''),
+            fetchNearbyToilets(location.latitude, location.longitude, searchRadius)
+          ]);
+
+          setPlaces(googlePlaces);
+          setToilets(osmToilets);
+          setToiletsFetched(true);
+
+          const totalCount = googlePlaces.length + osmToilets.length;
+          setScanStatus(totalCount > 0
+            ? `Found ${googlePlaces.length} places + ${osmToilets.length} toilets!`
+            : 'No places found nearby.');
+        } catch (e) {
+          setScanStatus('Error fetching places');
+          console.error(e);
+        } finally {
+          setIsPlacesLoading(false);
         }
       };
-      getPlaces();
+      fetchAll();
     }
-  }, [location, searchRadius, selectedCategory]);
+  }, [location]);
 
   // Fetch toilets when toilet category is selected
   const handleToiletSearch = async () => {
@@ -199,10 +222,13 @@ export default function TabOneScreen() {
     }
   };
 
-  const filteredPlaces = places
+  // Get the source data based on selected category
+  const sourceData = selectedCategory === 'toilet' ? toilets : places;
+
+  const filteredPlaces = sourceData
     .filter(place => {
-      // 1. Filter by Category
-      if (selectedCategory !== 'all') {
+      // 1. Filter by Category (skip for toilets since they're already filtered)
+      if (selectedCategory !== 'all' && selectedCategory !== 'toilet') {
         const CategoryObj = CATEGORIES.find(c => c.id === selectedCategory);
         if (CategoryObj && !place.types.some(t => CategoryObj.types.includes(t))) {
           return false;
@@ -241,8 +267,8 @@ export default function TabOneScreen() {
     });
 
   const isLoading = isLocationLoading || isPlacesLoading;
-  const hasPerformedScan = places.length > 0 || scanStatus.includes('No places');
-  const showScanButton = !hasPerformedScan && places.length === 0;
+  const hasPerformedScan = places.length > 0 || toilets.length > 0 || scanStatus.includes('No places');
+  const showScanButton = !hasPerformedScan && places.length === 0 && toilets.length === 0;
 
   // Helper to render stars
   const renderRating = (rating?: number, total?: number) => {
@@ -438,12 +464,20 @@ export default function TabOneScreen() {
                   style={styles.resultsList}
                   contentContainerStyle={styles.resultsContent}
                   showsVerticalScrollIndicator={false}
+                  refreshControl={
+                    <RefreshControl
+                      refreshing={refreshing}
+                      onRefresh={onRefresh}
+                      tintColor={theme.primary}
+                      colors={[theme.primary]}
+                    />
+                  }
                 >
                   <View style={styles.listHeader}>
                     <Text style={[styles.resultsTitle, { color: theme.text }]}>
                       Found {filteredPlaces.length} places
                     </Text>
-                    <TouchableOpacity onPress={() => { setPlaces([]); setScanStatus(''); setSearchQuery(''); }}>
+                    <TouchableOpacity onPress={() => { setPlaces([]); setToilets([]); setToiletsFetched(false); setScanStatus(''); setSearchQuery(''); }}>
                       <Text style={[styles.clearText, { color: theme.primary }]}>Clear & Rescan</Text>
                     </TouchableOpacity>
                   </View>
