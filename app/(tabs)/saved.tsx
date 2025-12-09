@@ -1,7 +1,7 @@
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { fetchPlaceDetails, getPlacePhotoUrl } from '@/services/places';
-import { getSavedPlaces, removePlace, SavedPlace, updateSavedPlace } from '@/services/storage';
+import { getSavedPlaces, removeAllPlaces, removePlace, SavedPlace, updateSavedPlace } from '@/services/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
@@ -51,31 +51,15 @@ export default function SavedScreen() {
         // Group by City
         const groups: Record<string, SavedPlace[]> = {};
         places.forEach(place => {
-            let city = 'Unknown Location';
+            let city = 'Other';
 
             if (place.city) {
                 city = place.city;
-            } else if (place.plus_code && place.plus_code.compound_code) {
-                const parts = place.plus_code.compound_code.split(' ');
-                if (parts.length > 1) {
-                    let addressPart = parts.slice(1).join(' ');
-                    const commaParts = addressPart.split(',');
-                    if (commaParts.length > 1) {
-                        addressPart = commaParts[0].trim();
-                    }
-                    const subRegionParts = addressPart.split(' - ');
-                    if (subRegionParts.length > 0) {
-                        city = subRegionParts[0].trim();
-                    } else {
-                        city = addressPart;
-                    }
-                }
             } else if (place.vicinity) {
+                // Fallback extraction
                 const parts = place.vicinity.split(',');
                 if (parts.length > 1) {
-                    let lastPart = parts[parts.length - 1].trim();
-                    lastPart = lastPart.replace(/^[\d\s]+/, '');
-                    city = lastPart;
+                    city = parts[parts.length - 1].trim().replace(/^[\d\s]+/, '');
                 } else {
                     city = place.vicinity;
                 }
@@ -87,7 +71,13 @@ export default function SavedScreen() {
             groups[city].push(place);
         });
 
-        const newSections = Object.keys(groups).sort().map(city => ({
+        // Default to keeping the first city expanded if none selected
+        const sortedCities = Object.keys(groups).sort();
+        if (!expandedCity && sortedCities.length > 0) {
+            setExpandedCity(sortedCities[0]);
+        }
+
+        const newSections = sortedCities.map(city => ({
             title: city,
             data: groups[city].sort((a, b) => b.savedAt - a.savedAt)
         }));
@@ -125,6 +115,25 @@ export default function SavedScreen() {
         );
     };
 
+    const confirmDeleteAll = () => {
+        Alert.alert(
+            "Delete All",
+            "Are you sure you want to delete ALL saved places? This cannot be undone.",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete All",
+                    onPress: async () => {
+                        await removeAllPlaces();
+                        setSections([]);
+                        loadPlaces();
+                    },
+                    style: "destructive"
+                }
+            ]
+        );
+    };
+
     const handlePlacePress = (place: SavedPlace) => {
         router.push({
             pathname: '/modal',
@@ -146,28 +155,66 @@ export default function SavedScreen() {
         const photoUrl = place.photos?.[0]?.name ? getPlacePhotoUrl(place.photos[0].name) : null;
 
         return (
-            <View style={[styles.card, { backgroundColor: theme.card, shadowColor: theme.text }]}>
-                <TouchableOpacity style={styles.cardContent} onPress={() => handlePlacePress(place)}>
+            <TouchableOpacity
+                activeOpacity={0.9}
+                style={[styles.card, { backgroundColor: theme.card, shadowColor: theme.text }]}
+                onPress={() => handlePlacePress(place)}
+            >
+                {/* Hero Image Section */}
+                <View style={styles.heroContainer}>
                     {photoUrl ? (
-                        <Image source={{ uri: photoUrl }} style={styles.placeInfoImage} />
+                        <Image source={{ uri: photoUrl }} style={styles.heroImage} resizeMode="cover" />
                     ) : (
-                        <View style={[styles.placeIcon, { backgroundColor: theme.background }]}>
-                            <Ionicons name="location" size={24} color={theme.accent} />
+                        <View style={[styles.placeholderHero, { backgroundColor: theme.background }]}>
+                            <Ionicons name="image-outline" size={48} color={theme.textLight} />
                         </View>
                     )}
-                    <View style={styles.placeInfo}>
-                        <Text style={[styles.placeName, { color: theme.text }]} numberOfLines={1}>{place.name}</Text>
-                        <Text style={[styles.placeAddress, { color: theme.textLight }]} numberOfLines={1}>{place.vicinity}</Text>
-                        <Text style={[styles.placeType, { color: theme.primary }]}>{place.types[0]?.replace('_', ' ')}</Text>
+
+                    {/* Floating Delete Button */}
+                    <TouchableOpacity
+                        onPress={() => confirmDelete(place)}
+                        style={[styles.deleteButton, { backgroundColor: 'rgba(0,0,0,0.4)' }]}
+                    >
+                        <Ionicons name="trash-outline" size={20} color="#fff" />
+                    </TouchableOpacity>
+
+                    {/* Category Tag Overlay */}
+                    <View style={styles.categoryBadge}>
+                        <Text style={styles.categoryText}>{place.types[0]?.replace('_', ' ')}</Text>
                     </View>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    onPress={() => confirmDelete(place)}
-                    style={styles.deleteButton}
-                >
-                    <Ionicons name="trash-outline" size={24} color={theme.danger} />
-                </TouchableOpacity>
-            </View>
+                </View>
+
+                {/* Content Section */}
+                <View style={styles.cardContent}>
+                    <View style={styles.headerRow}>
+                        <Text style={[styles.placeName, { color: theme.text }]} numberOfLines={1}>{place.name}</Text>
+                        {place.rating && (
+                            <View style={styles.ratingBadge}>
+                                <Ionicons name="star" size={12} color="#FBC02D" />
+                                <Text style={styles.ratingText}>{place.rating}</Text>
+                            </View>
+                        )}
+                    </View>
+
+                    <Text style={[styles.placeAddress, { color: theme.textLight }]} numberOfLines={1}>
+                        {place.vicinity}
+                    </Text>
+
+                    <View style={styles.footerRow}>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                            {place.opening_hours?.open_now !== undefined && (
+                                <Text style={[styles.statusText, { color: place.opening_hours.open_now ? '#00B894' : '#FF7675' }]}>
+                                    {place.opening_hours.open_now ? 'Open' : 'Closed'}
+                                </Text>
+                            )}
+                            {place.price_level && (
+                                <Text style={{ color: theme.textLight }}>• {'$'.repeat(place.price_level)}</Text>
+                            )}
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color={theme.textLight} />
+                    </View>
+                </View>
+            </TouchableOpacity>
         );
     };
 
@@ -176,22 +223,20 @@ export default function SavedScreen() {
         return (
             <TouchableOpacity
                 style={[
-                    styles.headerBackground,
-                    { backgroundColor: theme.card, shadowColor: theme.text },
-                    isExpanded && { backgroundColor: theme.primary }
+                    styles.sectionHeaderContainer,
+                    { backgroundColor: theme.background } // Transparent look merging with bg
                 ]}
                 onPress={() => toggleSection(title)}
                 activeOpacity={0.7}
             >
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="map-outline" size={20} color={isExpanded ? '#fff' : theme.accent} style={{ marginRight: 10 }} />
-                    <Text style={[styles.sectionHeader, { color: isExpanded ? '#fff' : theme.text }]}>{title}</Text>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
+                <View style={[styles.expandIcon, isExpanded && { backgroundColor: theme.accent }]}>
+                    <Ionicons
+                        name={isExpanded ? "chevron-up" : "chevron-down"}
+                        size={16}
+                        color={isExpanded ? "#fff" : theme.textLight}
+                    />
                 </View>
-                <Ionicons
-                    name={isExpanded ? "chevron-up" : "chevron-down"}
-                    size={20}
-                    color={isExpanded ? '#fff' : theme.textLight}
-                />
             </TouchableOpacity>
         );
     };
@@ -199,8 +244,15 @@ export default function SavedScreen() {
     return (
         <View style={[styles.container, { backgroundColor: theme.background }]}>
             <View style={styles.header}>
-                <Text style={[styles.headerTitle, { color: theme.text }]}>My Places</Text>
-                <Text style={[styles.headerSubtitle, { color: theme.textLight }]}>{sections.length} Cities Saved</Text>
+                <View style={styles.headerTopRow}>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>My Places</Text>
+                    {sections.length > 0 && (
+                        <TouchableOpacity onPress={confirmDeleteAll} style={styles.deleteAllButton}>
+                            <Text style={styles.deleteAllText}>Delete All</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+                <Text style={[styles.headerSubtitle, { color: theme.textLight }]}>{sections.reduce((acc, s) => acc + s.data.length, 0)} places saved across {sections.length} cities</Text>
             </View>
 
             {sections.length === 0 && !isLoading && (
@@ -231,89 +283,147 @@ const styles = StyleSheet.create({
     },
     header: {
         paddingHorizontal: 20,
-        marginBottom: 20,
+        marginBottom: 10,
+    },
+    headerTopRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
     },
     headerTitle: {
         fontSize: 34,
         fontWeight: '800',
         letterSpacing: -1,
     },
+    deleteAllButton: {
+        paddingVertical: 4,
+        paddingHorizontal: 8,
+    },
+    deleteAllText: {
+        color: '#FF4B4B',
+        fontSize: 14,
+        fontWeight: '600',
+    },
     headerSubtitle: {
-        fontSize: 16,
+        fontSize: 14,
         marginTop: 4,
     },
     list: {
         paddingHorizontal: 20,
-        paddingBottom: 20,
+        paddingBottom: 40,
     },
-    headerBackground: {
-        paddingVertical: 16,
-        paddingHorizontal: 20,
-        marginBottom: 10,
-        borderRadius: 16,
+    sectionHeaderContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
+        paddingVertical: 15,
+        marginTop: 10,
     },
-    sectionHeader: {
-        fontSize: 16,
+    sectionTitle: {
+        fontSize: 22,
         fontWeight: '700',
     },
-    card: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        borderRadius: 16,
-        padding: 16,
-        marginBottom: 10,
-        marginLeft: 10,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
-    },
-    cardContent: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    placeIcon: {
-        width: 50,
-        height: 50,
-        borderRadius: 8,
+    expandIcon: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 15,
+        backgroundColor: 'rgba(0,0,0,0.05)',
     },
-    placeInfoImage: {
-        width: 50,
-        height: 50,
-        borderRadius: 8,
-        marginRight: 15,
-        backgroundColor: '#333'
+    card: {
+        borderRadius: 20,
+        marginBottom: 20,
+        overflow: 'hidden',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 6,
     },
-    placeInfo: {
-        flex: 1,
+    heroContainer: {
+        height: 140,
+        width: '100%',
+        position: 'relative',
     },
-    placeName: {
-        fontSize: 16,
-        fontWeight: '700',
-        marginBottom: 2,
+    heroImage: {
+        width: '100%',
+        height: '100%',
     },
-    placeAddress: {
-        fontSize: 13,
-        marginBottom: 2,
-    },
-    placeType: {
-        fontSize: 11,
-        textTransform: 'uppercase',
-        fontWeight: '700',
+    placeholderHero: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     deleteButton: {
-        padding: 8,
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    categoryBadge: {
+        position: 'absolute',
+        bottom: 10,
+        left: 10,
+        backgroundColor: 'rgba(255,255,255,0.9)',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 8,
+    },
+    categoryText: {
+        fontSize: 10,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        color: '#333',
+    },
+    cardContent: {
+        padding: 16,
+    },
+    headerRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 4,
+    },
+    placeName: {
+        fontSize: 18,
+        fontWeight: '700',
+        flex: 1,
+        marginRight: 10,
+    },
+    ratingBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: '#FFF9C4',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    ratingText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#F57F17',
+    },
+    placeAddress: {
+        fontSize: 14,
+        marginBottom: 12,
+    },
+    footerRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(0,0,0,0.05)',
+        paddingTop: 10,
+    },
+    statusText: {
+        fontSize: 12,
+        fontWeight: '600',
     },
     emptyContainer: {
         alignItems: 'center',

@@ -1,4 +1,5 @@
 import { useColorScheme } from '@/components/useColorScheme';
+import { CATEGORIES } from '@/constants/Categories';
 import Colors from '@/constants/Colors';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { fetchNearbyPlaces, fetchPlaceDetails, getPlacePhotoUrl, Place, searchPlacesByText } from '@/services/places';
@@ -9,15 +10,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, LayoutAnimation, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
-
-const CATEGORIES = [
-  { id: 'all', label: 'All', types: [], icon: 'grid-outline' },
-  { id: 'cafe', label: 'Cafés', types: ['cafe', 'bakery', 'coffee_shop'], icon: 'cafe-outline' },
-  { id: 'restaurant', label: 'Food', types: ['restaurant', 'food'], icon: 'restaurant-outline' },
-  { id: 'bar', label: 'Bars', types: ['bar', 'night_club'], icon: 'wine-outline' },
-  { id: 'park', label: 'Parks', types: ['park'], icon: 'leaf-outline' },
-  { id: 'toilet', label: 'Toilets', types: ['toilet', 'restroom'], icon: 'water-outline', isOSM: true },
-];
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -34,10 +26,20 @@ export default function TabOneScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchRadius, setSearchRadius] = useState<number>(500); // Default 500m
+  const [searchMode, setSearchMode] = useState<'primary' | 'fallback'>('primary');
   const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
+
+  // Helper to determine types to fetch based on active category
+  const getTypesToFetch = () => {
+    if (selectedCategory === 'all' || selectedCategory === 'toilet') return undefined; // Fetch default whitelist
+    const cat = CATEGORIES.find(c => c.id === selectedCategory);
+    return cat ? cat.types : undefined;
+  };
+
+  const activeCategoryLabel = CATEGORIES.find(c => c.id === selectedCategory)?.label || 'Places';
 
   const handleScan = async () => {
     setPlaces([]);
@@ -48,28 +50,63 @@ export default function TabOneScreen() {
     await requestLocation();
   };
 
+  const handleFindClosest = async () => {
+    if (!location) return;
+    setScanStatus(`Finding closest ${activeCategoryLabel} nearby...`);
+    setIsPlacesLoading(true);
+
+    try {
+      // Manually force a large radius (5km) to find the absolute closest places
+      // We still respect the current category filter
+      const types = getTypesToFetch();
+      const googleData = await fetchNearbyPlaces(location.latitude, location.longitude, 5000, types);
+
+      setPlaces(googleData.results);
+      // Force fallback mode to ensure Distance > Quality sorting for these "closest" results
+      setSearchMode('fallback');
+
+      if (googleData.results.length > 0) {
+        setScanStatus(`Found ${googleData.results.length} closest ${activeCategoryLabel}!`);
+      } else {
+        setScanStatus(`Still nothing found even within 5km.`);
+      }
+
+    } catch (e) {
+      setScanStatus('Error finding closest places');
+      console.error(e);
+    } finally {
+      setIsPlacesLoading(false);
+    }
+  };
+
   const onRefresh = useCallback(async () => {
     if (!location) return;
     setRefreshing(true);
     setScanStatus('Refreshing...');
 
     try {
+      const types = getTypesToFetch();
       // Refresh both Google places and OSM toilets
-      const [googlePlaces, osmToilets] = await Promise.all([
-        fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, ''),
+      const [googleData, osmToilets] = await Promise.all([
+        fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, types),
         fetchNearbyToilets(location.latitude, location.longitude, searchRadius)
       ]);
 
-      setPlaces(googlePlaces);
+      setPlaces(googleData.results);
+      setSearchMode(googleData.mode);
       setToilets(osmToilets);
       setToiletsFetched(true);
-      setScanStatus(`Found ${googlePlaces.length} places + ${osmToilets.length} toilets!`);
+      setScanStatus(
+        googleData.mode === 'fallback'
+          ? `No places nearby. Found ${googleData.results.length} places further away + ${osmToilets.length} toilets!`
+          : `Found ${googleData.results.length} places + ${osmToilets.length} toilets!`
+      );
     } catch (error) {
       setScanStatus('Error refreshing');
     } finally {
       setRefreshing(false);
     }
-  }, [location, searchRadius]);
+  }, [location, searchRadius, selectedCategory]);
 
   const handleGlobalSearch = async () => {
     if (!location || !searchQuery.trim()) return;
@@ -81,6 +118,7 @@ export default function TabOneScreen() {
     try {
       const results = await searchPlacesByText(searchQuery, location.latitude, location.longitude);
       setPlaces(results);
+      setSearchMode('primary'); // Global search is always primary relevance
       setScanStatus(results.length > 0 ? `Found ${results.length} results for "${searchQuery}"` : `No results for "${searchQuery}"`);
       // Reset category to 'all' so we see the results
       setSelectedCategory('all');
@@ -109,20 +147,27 @@ export default function TabOneScreen() {
         setIsPlacesLoading(true);
 
         try {
+          const types = getTypesToFetch();
           // Fetch both Google places and OSM toilets in parallel
-          const [googlePlaces, osmToilets] = await Promise.all([
-            fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, ''),
+          const [googleData, osmToilets] = await Promise.all([
+            fetchNearbyPlaces(location.latitude, location.longitude, searchRadius, types),
             fetchNearbyToilets(location.latitude, location.longitude, searchRadius)
           ]);
 
-          setPlaces(googlePlaces);
+          setPlaces(googleData.results);
+          setSearchMode(googleData.mode);
           setToilets(osmToilets);
           setToiletsFetched(true);
 
-          const totalCount = googlePlaces.length + osmToilets.length;
-          setScanStatus(totalCount > 0
-            ? `Found ${googlePlaces.length} places + ${osmToilets.length} toilets!`
-            : 'No places found nearby.');
+          const totalCount = googleData.results.length + osmToilets.length;
+
+          if (googleData.mode === 'fallback') {
+            setScanStatus(`Nothing closeby. Found ${googleData.results.length} places further away.`);
+          } else {
+            setScanStatus(totalCount > 0
+              ? `Found ${googleData.results.length} places + ${osmToilets.length} toilets!`
+              : 'No places found nearby.');
+          }
         } catch (e) {
           setScanStatus('Error fetching places');
           console.error(e);
@@ -134,7 +179,6 @@ export default function TabOneScreen() {
     }
   }, [location]);
 
-  // Fetch toilets when toilet category is selected
   const handleToiletSearch = async () => {
     if (!location) return;
     setPlaces([]);
@@ -231,6 +275,7 @@ export default function TabOneScreen() {
       if (selectedCategory !== 'all' && selectedCategory !== 'toilet') {
         const CategoryObj = CATEGORIES.find(c => c.id === selectedCategory);
         if (CategoryObj && !place.types.some(t => CategoryObj.types.includes(t))) {
+          // Double check, though we likely fetched filtered already
           return false;
         }
       }
@@ -242,28 +287,32 @@ export default function TabOneScreen() {
       return true;
     })
     .sort((a, b) => {
-      // Bayesian Average Sorting
-      // Weighted Rating (WR) = (v / (v + m)) * R + (m / (v + m)) * C
-      // R = average for the place (rating)
-      // v = number of votes for the place (user_ratings_total)
-      // m = minimum votes required to be listed (confidence threshold, e.g. 10)
-      // C = the mean vote across the whole report (e.g. 4.0)
-
+      // --- "SMART SORT" LOGIC ---
       const getBayesianScore = (place: Place) => {
         const R = place.rating || 0;
         const v = place.user_ratings_total || 0;
         const m = 10;
         const C = 4.0;
-
         if (v === 0) return 0;
-
         return (v / (v + m)) * R + (m / (v + m)) * C;
       };
 
       const scoreA = getBayesianScore(a);
       const scoreB = getBayesianScore(b);
+      const distA = a.distance || 0;
+      const distB = b.distance || 0;
 
-      return scoreB - scoreA;
+      // PRIMARY MODE: Quality > Distance
+      if (searchMode === 'primary') {
+        const combinedA = (scoreA * 10) - (distA / 100);
+        const combinedB = (scoreB * 10) - (distB / 100);
+        return combinedB - combinedA;
+      }
+
+      // FALLBACK MODE: Distance > Quality
+      const combinedA = (10000 - distA) + (scoreA * 50);
+      const combinedB = (10000 - distB) + (scoreB * 50);
+      return combinedB - combinedA;
     });
 
   const isLoading = isLocationLoading || isPlacesLoading;
@@ -399,8 +448,13 @@ export default function TabOneScreen() {
           </View>
         ) : (
           <View style={{ flex: 1 }}>
-            {/* If we have places but filter returns none */}
-            {!isLoading && places.length > 0 && filteredPlaces.length === 0 ? (
+            {/* 
+              Logic Updated: 
+              If we aren't showing the big Scan Button, we are in "Result View".
+              If filteredPlaces is empty, we show Empty State (regardless of whether raw places is 0 or >0).
+              This covers both "API returned 0" AND "Filters hid everything".
+            */}
+            {!isLoading && filteredPlaces.length === 0 ? (
               <View style={{ flex: 1 }}>
                 <View style={styles.searchContainer}>
                   <View style={[styles.searchInputWrapper, { backgroundColor: theme.card, borderColor: theme.textLight }]}>
@@ -423,21 +477,37 @@ export default function TabOneScreen() {
                 <View style={styles.emptyStateContainer}>
                   <Ionicons name="search-outline" size={48} color={theme.textLight} />
                   <Text style={[styles.emptyStateText, { color: theme.text }]}>
-                    No matches found.
+                    {places.length === 0 ? 'No places found nearby.' : 'No matches found.'}
                   </Text>
                   <TouchableOpacity onPress={() => { setSelectedCategory('all'); setSearchQuery(''); }}>
                     <Text style={[styles.clearText, { color: theme.primary, marginTop: 10 }]}>Clear Filters</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.globalSearchButton, { backgroundColor: theme.card, borderColor: theme.primary, marginTop: 20 }]}
-                    onPress={handleGlobalSearch}
-                  >
-                    <Ionicons name="globe-outline" size={20} color={theme.primary} style={{ marginRight: 8 }} />
-                    <Text style={[styles.globalSearchText, { color: theme.primary }]}>
-                      Search Google Maps for "{searchQuery}"
-                    </Text>
-                  </TouchableOpacity>
+                  {/* Manual Fallback: Find Closest [Category] */}
+                  {selectedCategory !== 'all' && selectedCategory !== 'toilet' && (
+                    <TouchableOpacity
+                      style={[styles.globalSearchButton, { backgroundColor: theme.accent, borderColor: theme.accent, marginTop: 20 }]}
+                      onPress={handleFindClosest}
+                    >
+                      <Ionicons name="map-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={[styles.globalSearchText, { color: '#fff' }]}>
+                        Find closest {activeCategoryLabel}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {searchQuery.length > 0 && (
+                    <TouchableOpacity
+                      style={[styles.globalSearchButton, { backgroundColor: theme.card, borderColor: theme.primary, marginTop: 20 }]}
+                      onPress={handleGlobalSearch}
+                    >
+                      <Ionicons name="globe-outline" size={20} color={theme.primary} style={{ marginRight: 8 }} />
+                      <Text style={[styles.globalSearchText, { color: theme.primary }]}>
+                        Search Google Maps for "{searchQuery}"
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
                 </View>
               </View>
             ) : (
@@ -477,9 +547,6 @@ export default function TabOneScreen() {
                     <Text style={[styles.resultsTitle, { color: theme.text }]}>
                       Found {filteredPlaces.length} places
                     </Text>
-                    <TouchableOpacity onPress={() => { setPlaces([]); setToilets([]); setToiletsFetched(false); setScanStatus(''); setSearchQuery(''); }}>
-                      <Text style={[styles.clearText, { color: theme.primary }]}>Clear & Rescan</Text>
-                    </TouchableOpacity>
                   </View>
 
                   {filteredPlaces.map((place) => {
@@ -553,6 +620,18 @@ export default function TabOneScreen() {
 
                   <View style={{ height: 100 }} />
                 </ScrollView>
+
+                {/* Floating Clear & Rescan Button */}
+                <View style={styles.fabContainer}>
+                  <TouchableOpacity
+                    style={[styles.fabButton, { backgroundColor: theme.primary, shadowColor: theme.primary }]}
+                    onPress={() => { setPlaces([]); setToilets([]); setToiletsFetched(false); setScanStatus(''); setSearchQuery(''); }}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="refresh" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.fabText}>Clear & Rescan</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
             {isLoading && (
@@ -652,6 +731,21 @@ const styles = StyleSheet.create({
     color: '#FF4B4B',
     marginTop: 10,
   },
+  radiusContainer: {
+    flexDirection: 'row',
+    marginTop: 40,
+    gap: 15,
+  },
+  radiusChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  radiusText: {
+    fontWeight: '600',
+    fontSize: 14,
+  },
   searchContainer: {
     paddingHorizontal: 20,
     paddingBottom: 10,
@@ -738,6 +832,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     gap: 10,
   },
+  distanceText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -795,6 +893,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 10
   },
+  globalSearchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  globalSearchText: {
+    fontWeight: '600',
+    fontSize: 14,
+  },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
@@ -802,42 +912,33 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   loadingText: {
-    marginTop: 20,
+    marginTop: 10,
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
   },
-  distanceText: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginLeft: 8,
+  // Floating Action Button
+  fabContainer: {
+    position: 'absolute',
+    bottom: 30, // Above tab bar
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
   },
-  globalSearchButton: {
+  fabButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 30,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  globalSearchText: {
+  fabText: {
+    color: '#fff',
     fontWeight: '700',
-    fontSize: 14,
-  },
-  radiusContainer: {
-    flexDirection: 'row',
-    marginTop: 30,
-    gap: 15,
-  },
-  radiusChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    minWidth: 70,
-    alignItems: 'center',
-  },
-  radiusText: {
-    fontWeight: '700',
-    fontSize: 12,
+    fontSize: 16,
   },
 });

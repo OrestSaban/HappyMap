@@ -31,8 +31,9 @@ export const fetchNearbyToilets = async (
     // Use larger radius for expanded search
     const searchRadius = isExpanded ? 5000 : radius;
 
+    // Increase timeout to 25s to avoid frequent 504s
     const query = `
-        [out:json][timeout:15];
+        [out:json][timeout:25];
         (
             node["amenity"="toilets"](around:${searchRadius},${latitude},${longitude});
             way["amenity"="toilets"](around:${searchRadius},${latitude},${longitude});
@@ -50,6 +51,12 @@ export const fetchNearbyToilets = async (
         });
 
         if (!response.ok) {
+            // Gracefully handle timeouts or overloaded server
+            if (response.status === 504 || response.status === 429 || response.status === 502) {
+                console.warn(`Overpass API unavailable (Status ${response.status}). Returning empty list.`);
+                // Return empty list so the app doesn't crash or show error state, just "0 toilets found"
+                return [];
+            }
             throw new Error(`Overpass API error: ${response.status}`);
         }
 
@@ -116,6 +123,8 @@ export const fetchNearbyToilets = async (
         // If no results and this wasn't already an expanded search, expand and return closest 10
         if (toilets.length === 0 && !isExpanded) {
             console.log('No toilets in radius, expanding search to 5km...');
+            // Add a small delay/jitter before retrying to avoid hammering the server
+            await new Promise(r => setTimeout(r, 1000));
             return fetchNearbyToilets(latitude, longitude, radius, true);
         }
 
@@ -128,7 +137,8 @@ export const fetchNearbyToilets = async (
 
     } catch (error) {
         console.error('Error fetching toilets from OSM:', error);
-        throw error;
+        // Return empty array instead of crashing on network issues
+        return [];
     }
 };
 

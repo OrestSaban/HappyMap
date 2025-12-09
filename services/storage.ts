@@ -7,6 +7,7 @@ const STORAGE_KEY = 'HAPPYMAP_SAVED_PLACES';
 export type SavedPlace = Place & {
     savedAt: number;
     city?: string; // Canonical City Name from Google
+    // Add custom notes etc later
 };
 
 export const savePlace = async (place: Place & { city?: string }): Promise<void> => {
@@ -25,11 +26,11 @@ export const savePlace = async (place: Place & { city?: string }): Promise<void>
     }
 };
 
-export const updateSavedPlace = async (updatedPlace: SavedPlace): Promise<void> => {
+export const updateSavedPlace = async (placeId: string, updates: Partial<SavedPlace>): Promise<void> => {
     try {
         const currentSaved = await getSavedPlaces();
         const updatedList = currentSaved.map(p =>
-            p.place_id === updatedPlace.place_id ? updatedPlace : p
+            p.place_id === placeId ? { ...p, ...updates } : p
         );
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
     } catch (e) {
@@ -54,6 +55,14 @@ export const removePlace = async (placeId: string): Promise<void> => {
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
     } catch (e) {
         console.error('Failed to remove place', e);
+    }
+};
+
+export const removeAllPlaces = async (): Promise<void> => {
+    try {
+        await AsyncStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+        console.error('Failed to remove all places', e);
     }
 };
 

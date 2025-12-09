@@ -1,3 +1,5 @@
+import { ALL_GOOGLE_TYPES } from '@/constants/Categories';
+
 export type Place = {
     place_id: string;
     name: string;
@@ -49,8 +51,8 @@ export const fetchNearbyPlaces = async (
     latitude: number,
     longitude: number,
     radius: number = 300,
-    type: string = '' // Unused in V1 strict mode, kept for signature compatibility
-): Promise<Place[]> => {
+    customIncludedTypes?: string[] // Optional override for filtered scans
+): Promise<{ results: Place[], mode: 'primary' | 'fallback' }> => {
     if (!GOOGLE_PLACES_API_KEY) {
         console.error('Google Places API Key is missing!');
         throw new Error('API Key missing');
@@ -58,19 +60,10 @@ export const fetchNearbyPlaces = async (
 
     const url = 'https://places.googleapis.com/v1/places:searchNearby';
 
-    // Strict Whitelist for V1 API
-    const includedTypes = [
-        'restaurant',
-        'cafe',
-        'bar',
-        'bakery',
-        'park',
-        'tourist_attraction',
-        'museum',
-        'art_gallery',
-        'night_club',
-        'stadium'
-    ];
+    // Use override if provided (e.g. for "Cafes only"), else use master whitelist
+    const includedTypes = customIncludedTypes && customIncludedTypes.length > 0
+        ? customIncludedTypes
+        : ALL_GOOGLE_TYPES;
 
     const requestBody = {
         includedTypes: includedTypes,
@@ -145,18 +138,16 @@ export const fetchNearbyPlaces = async (
             };
         });
 
-        // If no results found and not already at max radius, expand search to 5km
-        if (places.length === 0 && radius < 5000) {
-            console.log('No places in radius, expanding search to 5km...');
-            const expandedPlaces = await fetchNearbyPlaces(latitude, longitude, 5000);
-            // Sort by distance and return 10 closest
-            return expandedPlaces
-                .sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity))
-                .slice(0, 10);
+        // 1. Primary Mode: If results found within radius
+        if (places.length > 0) {
+            // Return raw results, sorting will happen in UI based on "Quality > Distance"
+            return { results: places, mode: 'primary' };
         }
 
-        // Sort by distance
-        return places.sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
+        // 2. Fallback Logic:
+        // We REMOVED automatic recursion here.
+        // The UI will now handle the "No matches" state and waiting for user input to expand.
+        return { results: [], mode: 'primary' };
 
     } catch (error) {
         console.error('Error fetching places:', error);
